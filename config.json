@@ -1,0 +1,19 @@
+{
+  "weibo": {
+    "cookie_sub": "your_weibo_cookie_sub_value_here",
+    "api_url": "https://s.weibo.com/top/summary?cate=realtimehot"
+  },
+  "openrouter": {
+    "api_key": "your_openrouter_api_key_here",
+    "api_url": "https://openrouter.ai/api/v1/chat/completions",
+    "model": "gpt-4o-mini"
+  },
+  "data": {
+    "storage_dir": "./data",
+    "history_days": 7
+  },
+  "report": {
+    "output_dir": "./reports",
+    "template_file": "./templates/report_template.html"
+  }
+}
