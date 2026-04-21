@@ -28,7 +28,7 @@ class AIAnalyzer:
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {self.api_key}',
             'HTTP-Referer': 'https://github.com/WeiboHotTradeSignal',
-            'X-Title': '微博热搜交易信号分析器'
+            'X-Title': 'Weibo-Hot-Trade-Signal-Analyzer'
         }
         
         messages = []
