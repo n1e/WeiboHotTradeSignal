@@ -10,7 +10,9 @@
   },
   "data": {
     "storage_dir": "./data",
-    "history_days": 7
+    "history_days": 7,
+    "use_duckdb": true,
+    "db_path": "./data/weibo_hot.duckdb"
   },
   "report": {
     "output_dir": "./reports",

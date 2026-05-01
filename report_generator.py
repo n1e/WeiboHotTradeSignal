@@ -36,40 +36,42 @@ class ReportGenerator:
         """准备模板数据"""
         report_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # 准备当前热搜数据
-        current_hot_list = current_data.get('hot_list', []) if current_data else []
+        current_hot_list = []
+        if isinstance(current_data, dict):
+            hot_list = current_data.get('hot_list', [])
+            if isinstance(hot_list, list):
+                current_hot_list = hot_list
         
-        # 准备趋势分析数据
         trend_analysis = None
-        if analysis_result and 'trend_analysis' in analysis_result:
-            trend_analysis = analysis_result['trend_analysis']
+        if isinstance(analysis_result, dict):
+            ta = analysis_result.get('trend_analysis')
+            if isinstance(ta, dict):
+                trend_analysis = ta
         
-        # 准备股票分析数据
         stock_opportunities = []
         market_sentiment = None
         report_summary = None
         
-        if analysis_result and 'stock_analysis' in analysis_result:
-            stock_analysis = analysis_result['stock_analysis']
-            
-            # 提取交易机会
-            if 'stock_opportunities' in stock_analysis:
-                stock_opportunities = stock_analysis['stock_opportunities']
-            
-            # 提取市场情绪
-            if 'market_sentiment' in stock_analysis:
-                market_sentiment = stock_analysis['market_sentiment']
-            
-            # 提取总结
-            if 'summary' in stock_analysis:
-                report_summary = stock_analysis['summary']
+        if isinstance(analysis_result, dict):
+            stock_analysis = analysis_result.get('stock_analysis')
+            if isinstance(stock_analysis, dict):
+                so = stock_analysis.get('stock_opportunities')
+                if isinstance(so, list):
+                    stock_opportunities = so
+                
+                ms = stock_analysis.get('market_sentiment')
+                if isinstance(ms, dict):
+                    market_sentiment = ms
+                
+                rs = stock_analysis.get('summary')
+                if isinstance(rs, str):
+                    report_summary = rs
         
-        # 构建模板数据
         template_data = {
             'report_time': report_time,
-            'current_hot_list': current_hot_list[:50],  # 最多显示前50条
+            'current_hot_list': current_hot_list[:50] if isinstance(current_hot_list, list) else [],
             'trend_analysis': trend_analysis,
-            'stock_opportunities': stock_opportunities,
+            'stock_opportunities': stock_opportunities if isinstance(stock_opportunities, list) else [],
             'market_sentiment': market_sentiment,
             'report_summary': report_summary
         }
