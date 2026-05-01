@@ -20,7 +20,7 @@
   },
   "schedule": {
     "enabled": true,
-    "interval_minutes": 30,
+    "interval_minutes": 10,
     "active_hours": "09:00-21:00",
     "timezone": "Asia/Shanghai"
   },
