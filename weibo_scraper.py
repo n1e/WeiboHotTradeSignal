@@ -11,6 +11,12 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
+try:
+    from duckdb_storage import DuckDBStorage
+    HAS_DUCKDB = True
+except ImportError:
+    HAS_DUCKDB = False
+
 
 class WeiboScraper:
     def __init__(self, config):
@@ -20,9 +26,18 @@ class WeiboScraper:
         self.api_url = self.weibo_config.get('api_url', 'https://s.weibo.com/top/summary?cate=realtimehot')
         self.cookie_sub = self.weibo_config.get('cookie_sub', '')
         self.storage_dir = self.data_config.get('storage_dir', './data')
+        self.use_duckdb = self.data_config.get('use_duckdb', True) and HAS_DUCKDB
         
-        # 确保数据存储目录存在
         os.makedirs(self.storage_dir, exist_ok=True)
+        
+        self.duckdb_storage = None
+        if self.use_duckdb:
+            try:
+                self.duckdb_storage = DuckDBStorage(config)
+                print("DuckDB存储已启用")
+            except Exception as e:
+                print(f"DuckDB初始化失败，将使用JSON存储: {e}")
+                self.use_duckdb = False
     
     def _get_headers(self):
         """构建请求头"""
@@ -195,7 +210,6 @@ class WeiboScraper:
             return None
         
         if not filename:
-            # 使用时间戳作为文件名
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f'weibo_hot_{timestamp}.json'
         
@@ -207,24 +221,88 @@ class WeiboScraper:
             print(f"数据已保存到: {filepath}")
             return filepath
         except Exception as e:
-            print(f"保存数据失败: {e}")
+            print(f"保存JSON数据失败: {e}")
             return None
     
+    def save_to_duckdb(self, data):
+        """保存数据到DuckDB数据库"""
+        if not self.use_duckdb or not self.duckdb_storage:
+            return None
+        
+        if not data:
+            print("没有数据可保存到数据库")
+            return None
+        
+        try:
+            snapshot_id = self.duckdb_storage.save_hot_search(data)
+            if snapshot_id:
+                print(f"数据已保存到数据库: 快照ID={snapshot_id}")
+            return snapshot_id
+        except Exception as e:
+            print(f"保存数据到数据库失败: {e}")
+            return None
+    
+    def save_data(self, data):
+        """
+        保存数据（同时保存到JSON和DuckDB）
+        
+        Args:
+            data: 热搜数据
+            
+        Returns:
+            dict: 包含保存结果的字典
+        """
+        result = {
+            'json_path': None,
+            'snapshot_id': None
+        }
+        
+        result['json_path'] = self.save_to_json(data)
+        
+        if self.use_duckdb and self.duckdb_storage:
+            result['snapshot_id'] = self.save_to_duckdb(data)
+        
+        return result
+    
     def get_history_data(self, days=None):
-        """获取历史数据"""
+        """
+        获取历史数据
+        
+        优先从DuckDB获取，如果DuckDB不可用则从JSON文件获取
+        
+        Args:
+            days: 历史天数
+            
+        Returns:
+            历史数据列表
+        """
+        if days is None:
+            days = self.data_config.get('history_days', 7)
+        
+        if self.use_duckdb and self.duckdb_storage:
+            try:
+                history_data = self.duckdb_storage.get_history_by_days(days, include_items=True)
+                if history_data:
+                    print(f"从数据库获取到 {len(history_data)} 条历史数据")
+                    return history_data
+            except Exception as e:
+                print(f"从数据库获取历史数据失败，尝试从JSON文件获取: {e}")
+        
+        return self._get_history_data_from_json(days)
+    
+    def _get_history_data_from_json(self, days=None):
+        """从JSON文件获取历史数据"""
         if days is None:
             days = self.data_config.get('history_days', 7)
         
         history_files = []
         
-        # 获取所有JSON文件
         if os.path.exists(self.storage_dir):
             for filename in os.listdir(self.storage_dir):
                 if filename.startswith('weibo_hot_') and filename.endswith('.json'):
                     filepath = os.path.join(self.storage_dir, filename)
                     history_files.append(filepath)
         
-        # 按修改时间排序，取最近的days个
         history_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
         history_files = history_files[:days]
         
@@ -239,20 +317,36 @@ class WeiboScraper:
         
         return history_data
     
+    def migrate_json_to_duckdb(self):
+        """将现有的JSON数据迁移到DuckDB"""
+        if not self.use_duckdb or not self.duckdb_storage:
+            print("DuckDB未启用，无法迁移")
+            return (0, 0)
+        
+        return self.duckdb_storage.migrate_from_json(self.storage_dir)
+    
+    def get_database_stats(self):
+        """获取数据库统计信息"""
+        if not self.use_duckdb or not self.duckdb_storage:
+            return None
+        
+        return {
+            'snapshot_count': self.duckdb_storage.get_snapshot_count(),
+            'item_count': self.duckdb_storage.get_item_count()
+        }
+    
     def run(self):
         """执行采集流程"""
         print("开始采集微博热搜数据...")
         
-        # 获取热搜数据
         data = self.fetch_hot_search()
         
         if data:
             print(f"成功获取 {data['total_count']} 条热搜数据")
             
-            # 保存数据
-            filepath = self.save_to_json(data)
+            save_result = self.save_data(data)
             
-            if filepath:
+            if save_result.get('json_path') or save_result.get('snapshot_id'):
                 print("数据采集完成！")
                 return data
             else:
