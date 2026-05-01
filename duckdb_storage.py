@@ -1122,6 +1122,58 @@ class DuckDBStorage:
         except Exception as e:
             print(f"获取每周热门话题总结失败: {e}")
             return None
+    
+    def clear_daily_hot_topics(self) -> bool:
+        """
+        清空每日热门话题总结相关的数据表
+        
+        Returns:
+            是否成功
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM daily_hot_topic_items")
+                conn.execute("DELETE FROM daily_hot_topic_summaries")
+                conn.commit()
+                
+                print("已清空每日热门话题总结相关数据表")
+                return True
+                
+        except Exception as e:
+            print(f"清空每日热门话题总结数据表失败: {e}")
+            return False
+    
+    def clear_weekly_hot_topics(self) -> bool:
+        """
+        清空每周热门话题总结相关的数据表
+        
+        Returns:
+            是否成功
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM weekly_hot_topic_items")
+                conn.execute("DELETE FROM weekly_hot_topic_summaries")
+                conn.commit()
+                
+                print("已清空每周热门话题总结相关数据表")
+                return True
+                
+        except Exception as e:
+            print(f"清空每周热门话题总结数据表失败: {e}")
+            return False
+    
+    def clear_all_hot_topic_summaries(self) -> bool:
+        """
+        清空所有热门话题总结相关的数据表（每日和每周）
+        
+        Returns:
+            是否成功
+        """
+        daily_success = self.clear_daily_hot_topics()
+        weekly_success = self.clear_weekly_hot_topics()
+        
+        return daily_success and weekly_success
 
 
 def main():

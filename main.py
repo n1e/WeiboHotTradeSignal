@@ -575,6 +575,11 @@ def main():
     summary_group.add_argument('--week-start', type=str, help='指定每周总结的开始日期，格式为 YYYY-MM-DD')
     summary_group.add_argument('--week-end', type=str, help='指定每周总结的结束日期，格式为 YYYY-MM-DD')
     
+    clear_group = parser.add_argument_group('清理数据参数（用于清理之前不合理的数据）')
+    clear_group.add_argument('--clear-daily-topics', action='store_true', help='清空每日热门话题总结相关的数据表')
+    clear_group.add_argument('--clear-weekly-topics', action='store_true', help='清空每周热门话题总结相关的数据表')
+    clear_group.add_argument('--clear-all-topics', action='store_true', help='清空所有热门话题总结相关的数据表（每日+每周）')
+    
     args = parser.parse_args()
     
     print("=" * 60)
@@ -592,6 +597,42 @@ def main():
     print(f"配置文件加载成功: {args.config}")
     
     init_logging(config)
+    
+    if args.clear_all_topics:
+        logger.info("\n⚠️  清空所有热门话题总结数据表...")
+        from duckdb_storage import DuckDBStorage
+        storage = DuckDBStorage(config)
+        success = storage.clear_all_hot_topic_summaries()
+        if success:
+            logger.info("所有热门话题总结数据表已清空")
+            sys.exit(0)
+        else:
+            logger.error("清空数据表失败！")
+            sys.exit(1)
+    
+    if args.clear_daily_topics:
+        logger.info("\n⚠️  清空每日热门话题总结数据表...")
+        from duckdb_storage import DuckDBStorage
+        storage = DuckDBStorage(config)
+        success = storage.clear_daily_hot_topics()
+        if success:
+            logger.info("每日热门话题总结数据表已清空")
+            sys.exit(0)
+        else:
+            logger.error("清空数据表失败！")
+            sys.exit(1)
+    
+    if args.clear_weekly_topics:
+        logger.info("\n⚠️  清空每周热门话题总结数据表...")
+        from duckdb_storage import DuckDBStorage
+        storage = DuckDBStorage(config)
+        success = storage.clear_weekly_hot_topics()
+        if success:
+            logger.info("每周热门话题总结数据表已清空")
+            sys.exit(0)
+        else:
+            logger.error("清空数据表失败！")
+            sys.exit(1)
     
     if args.daily_summary:
         logger.info("\n⚠️  执行每日热门话题总结模式")
