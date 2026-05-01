@@ -24,6 +24,17 @@
     "active_hours": "09:00-21:00",
     "timezone": "Asia/Shanghai"
   },
+  "summary": {
+    "daily": {
+      "enabled": true,
+      "time": "22:00"
+    },
+    "weekly": {
+      "enabled": true,
+      "time": "23:00",
+      "day": 6
+    }
+  },
   "push": {
     "enabled": true,
     "feishu": {

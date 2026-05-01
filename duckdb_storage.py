@@ -68,6 +68,81 @@ class DuckDBStorage:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_rank ON hot_search_items(rank)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_time_title ON hot_search_items(snapshot_time, title)")
             
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_daily_summary_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_daily_topic_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_weekly_summary_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_weekly_topic_id START 1")
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_hot_topic_summaries (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_daily_summary_id'),
+                    summary_date DATE NOT NULL UNIQUE,
+                    total_snapshots INTEGER NOT NULL DEFAULT 0,
+                    total_topics INTEGER NOT NULL DEFAULT 0,
+                    summary_text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_hot_topic_items (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_daily_topic_id'),
+                    daily_summary_id INTEGER NOT NULL,
+                    rank INTEGER NOT NULL,
+                    title VARCHAR NOT NULL,
+                    appear_count INTEGER NOT NULL DEFAULT 0,
+                    best_rank INTEGER,
+                    avg_hot_value DOUBLE,
+                    max_hot_value DOUBLE,
+                    first_appear_time TIMESTAMP,
+                    last_appear_time TIMESTAMP,
+                    is_persistent BOOLEAN DEFAULT FALSE,
+                    persistence_reason VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (daily_summary_id) REFERENCES daily_hot_topic_summaries(id)
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS weekly_hot_topic_summaries (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_weekly_summary_id'),
+                    week_start_date DATE NOT NULL UNIQUE,
+                    week_end_date DATE NOT NULL,
+                    total_daily_summaries INTEGER NOT NULL DEFAULT 0,
+                    total_topics INTEGER NOT NULL DEFAULT 0,
+                    summary_text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS weekly_hot_topic_items (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_weekly_topic_id'),
+                    weekly_summary_id INTEGER NOT NULL,
+                    rank INTEGER NOT NULL,
+                    title VARCHAR NOT NULL,
+                    appear_days INTEGER NOT NULL DEFAULT 0,
+                    daily_appear_detail VARCHAR,
+                    heat_trend VARCHAR,
+                    heat_evolution TEXT,
+                    first_appear_date DATE,
+                    last_appear_date DATE,
+                    is_sustained BOOLEAN DEFAULT FALSE,
+                    sustained_reason VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (weekly_summary_id) REFERENCES weekly_hot_topic_summaries(id)
+                )
+            """)
+            
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_hot_topic_summaries(summary_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_topic_summary_id ON daily_hot_topic_items(daily_summary_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_topic_title ON daily_hot_topic_items(title)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_weekly_summary_week ON weekly_hot_topic_summaries(week_start_date, week_end_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_weekly_topic_summary_id ON weekly_hot_topic_items(weekly_summary_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_weekly_topic_title ON weekly_hot_topic_items(title)")
+            
             conn.commit()
     
     def _parse_hot_value(self, hot_str: str) -> float:
@@ -515,6 +590,590 @@ class DuckDBStorage:
         
         print(f"导出完成: 导出 {export_count} 个快照到 {output_dir}")
         return export_count
+    
+    def get_daily_snapshots_for_summary(self, target_date: datetime = None) -> List[Dict]:
+        """
+        获取某日用于总结的代表性快照数据
+        为节省token，只返回代表性快照（第一个、最后一个、中间几个，不超过5个）的关键信息
+        
+        Args:
+            target_date: 目标日期，默认为今天
+            
+        Returns:
+            代表性快照列表，每个快照包含时间和TOP热搜信息
+        """
+        if target_date is None:
+            target_date = datetime.now()
+        
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                snapshots = conn.execute("""
+                    SELECT id, snapshot_time, total_count
+                    FROM hot_search_snapshots
+                    WHERE snapshot_time >= ? AND snapshot_time <= ?
+                    ORDER BY snapshot_time
+                """, [start_of_day, end_of_day]).fetchall()
+                
+                if not snapshots:
+                    return []
+                
+                total_snapshots = len(snapshots)
+                
+                selected_indices = []
+                if total_snapshots <= 5:
+                    selected_indices = list(range(total_snapshots))
+                else:
+                    selected_indices = [0, total_snapshots - 1]
+                    if total_snapshots >= 3:
+                        selected_indices.append(total_snapshots // 2)
+                    if total_snapshots >= 4:
+                        selected_indices.append(total_snapshots // 3)
+                    if total_snapshots >= 5:
+                        selected_indices.append(total_snapshots * 2 // 3)
+                    selected_indices = sorted(list(set(selected_indices)))
+                
+                result = []
+                for idx in selected_indices:
+                    snapshot_id, snapshot_time, total_count = snapshots[idx]
+                    
+                    items = conn.execute("""
+                        SELECT rank, title, hot, hot_value
+                        FROM hot_search_items
+                        WHERE snapshot_id = ?
+                        ORDER BY rank
+                        LIMIT 20
+                    """, [snapshot_id]).fetchall()
+                    
+                    hot_list = []
+                    for item in items:
+                        rank, title, hot, hot_value = item
+                        hot_list.append({
+                            'rank': rank,
+                            'title': title,
+                            'hot': hot,
+                            'hot_value': hot_value
+                        })
+                    
+                    result.append({
+                        'snapshot_time': snapshot_time.isoformat(),
+                        'total_count': total_count,
+                        'hot_list': hot_list,
+                        'is_representative': True
+                    })
+                
+                return result
+                
+        except Exception as e:
+            print(f"获取每日总结快照失败: {e}")
+            return []
+    
+    def get_topic_appearances_by_date(self, target_date: datetime = None) -> Dict[str, Dict]:
+        """
+        获取某日每个话题的出现统计
+        
+        Args:
+            target_date: 目标日期，默认为今天
+            
+        Returns:
+            字典，key为话题标题，value为统计信息
+        """
+        if target_date is None:
+            target_date = datetime.now()
+        
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT 
+                        title,
+                        COUNT(*) as appear_count,
+                        MIN(rank) as best_rank,
+                        AVG(hot_value) as avg_hot_value,
+                        MAX(hot_value) as max_hot_value,
+                        MIN(snapshot_time) as first_appear_time,
+                        MAX(snapshot_time) as last_appear_time
+                    FROM hot_search_items
+                    WHERE snapshot_time >= ? AND snapshot_time <= ?
+                    GROUP BY title
+                    ORDER BY appear_count DESC, best_rank ASC
+                """, [start_of_day, end_of_day]).fetchall()
+                
+                topic_stats = {}
+                for row in results:
+                    title, appear_count, best_rank, avg_hot_value, max_hot_value, first_appear_time, last_appear_time = row
+                    topic_stats[title] = {
+                        'appear_count': appear_count,
+                        'best_rank': best_rank,
+                        'avg_hot_value': avg_hot_value,
+                        'max_hot_value': max_hot_value,
+                        'first_appear_time': first_appear_time.isoformat() if first_appear_time else None,
+                        'last_appear_time': last_appear_time.isoformat() if last_appear_time else None
+                    }
+                
+                return topic_stats
+                
+        except Exception as e:
+            print(f"获取话题统计失败: {e}")
+            return {}
+    
+    def save_daily_hot_topic_summary(
+        self,
+        summary_date: datetime,
+        topics: List[Dict],
+        summary_text: str = None
+    ) -> Optional[int]:
+        """
+        保存每日热门话题总结结果
+        
+        Args:
+            summary_date: 总结日期
+            topics: 热门话题列表，每个话题包含:
+                - rank: 排名
+                - title: 标题
+                - appear_count: 出现次数
+                - best_rank: 最好排名
+                - avg_hot_value: 平均热度
+                - max_hot_value: 最高热度
+                - first_appear_time: 首次出现时间
+                - last_appear_time: 最后出现时间
+                - is_persistent: 是否为持久性话题
+                - persistence_reason: 持久性原因
+            summary_text: AI生成的总结文本
+            
+        Returns:
+            总结记录ID，如果保存失败返回None
+        """
+        try:
+            summary_date_only = summary_date.date()
+            
+            with duckdb.connect(self.db_path) as conn:
+                existing = conn.execute("""
+                    SELECT id FROM daily_hot_topic_summaries WHERE summary_date = ?
+                """, [summary_date_only]).fetchone()
+                
+                if existing:
+                    summary_id = existing[0]
+                    conn.execute("""
+                        DELETE FROM daily_hot_topic_items WHERE daily_summary_id = ?
+                    """, [summary_id])
+                    
+                    conn.execute("""
+                        UPDATE daily_hot_topic_summaries 
+                        SET total_topics = ?, summary_text = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, [len(topics), summary_text, summary_id])
+                else:
+                    result = conn.execute("""
+                        INSERT INTO daily_hot_topic_summaries 
+                        (summary_date, total_snapshots, total_topics, summary_text, created_at, updated_at)
+                        VALUES (?, 0, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        RETURNING id
+                    """, [summary_date_only, len(topics), summary_text]).fetchone()
+                    
+                    if not result:
+                        print("保存每日总结失败")
+                        return None
+                    
+                    summary_id = result[0]
+                
+                for topic in topics:
+                    conn.execute("""
+                        INSERT INTO daily_hot_topic_items 
+                        (daily_summary_id, rank, title, appear_count, best_rank, 
+                         avg_hot_value, max_hot_value, first_appear_time, last_appear_time,
+                         is_persistent, persistence_reason, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, [
+                        summary_id,
+                        topic.get('rank', 0),
+                        topic.get('title', ''),
+                        topic.get('appear_count', 0),
+                        topic.get('best_rank'),
+                        topic.get('avg_hot_value'),
+                        topic.get('max_hot_value'),
+                        datetime.fromisoformat(topic['first_appear_time']) if topic.get('first_appear_time') else None,
+                        datetime.fromisoformat(topic['last_appear_time']) if topic.get('last_appear_time') else None,
+                        topic.get('is_persistent', False),
+                        topic.get('persistence_reason')
+                    ])
+                
+                conn.commit()
+                
+                print(f"每日热门话题总结已保存: 日期={summary_date_only}, 话题数={len(topics)}")
+                return summary_id
+                
+        except Exception as e:
+            print(f"保存每日热门话题总结失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def get_daily_hot_topic_summary(self, summary_date: datetime) -> Optional[Dict]:
+        """
+        获取指定日期的热门话题总结
+        
+        Args:
+            summary_date: 总结日期
+            
+        Returns:
+            总结数据字典，如果不存在返回None
+        """
+        try:
+            summary_date_only = summary_date.date()
+            
+            with duckdb.connect(self.db_path) as conn:
+                summary = conn.execute("""
+                    SELECT id, summary_date, total_snapshots, total_topics, summary_text, created_at, updated_at
+                    FROM daily_hot_topic_summaries
+                    WHERE summary_date = ?
+                """, [summary_date_only]).fetchone()
+                
+                if not summary:
+                    return None
+                
+                summary_id, date, total_snapshots, total_topics, summary_text, created_at, updated_at = summary
+                
+                topics = conn.execute("""
+                    SELECT rank, title, appear_count, best_rank, avg_hot_value, max_hot_value,
+                           first_appear_time, last_appear_time, is_persistent, persistence_reason
+                    FROM daily_hot_topic_items
+                    WHERE daily_summary_id = ?
+                    ORDER BY rank
+                """, [summary_id]).fetchall()
+                
+                topic_list = []
+                for row in topics:
+                    rank, title, appear_count, best_rank, avg_hot_value, max_hot_value, \
+                        first_appear_time, last_appear_time, is_persistent, persistence_reason = row
+                    
+                    topic_list.append({
+                        'rank': rank,
+                        'title': title,
+                        'appear_count': appear_count,
+                        'best_rank': best_rank,
+                        'avg_hot_value': avg_hot_value,
+                        'max_hot_value': max_hot_value,
+                        'first_appear_time': first_appear_time.isoformat() if first_appear_time else None,
+                        'last_appear_time': last_appear_time.isoformat() if last_appear_time else None,
+                        'is_persistent': is_persistent,
+                        'persistence_reason': persistence_reason
+                    })
+                
+                return {
+                    'id': summary_id,
+                    'summary_date': date.isoformat(),
+                    'total_snapshots': total_snapshots,
+                    'total_topics': total_topics,
+                    'summary_text': summary_text,
+                    'topics': topic_list,
+                    'created_at': created_at.isoformat() if created_at else None,
+                    'updated_at': updated_at.isoformat() if updated_at else None
+                }
+                
+        except Exception as e:
+            print(f"获取每日热门话题总结失败: {e}")
+            return None
+    
+    def get_daily_summaries_for_week(self, week_start: datetime, week_end: datetime) -> List[Dict]:
+        """
+        获取一周内的每日总结，用于生成每周总结
+        
+        Args:
+            week_start: 周开始日期
+            week_end: 周结束日期
+            
+        Returns:
+            每日总结列表
+        """
+        try:
+            start_date = week_start.date()
+            end_date = week_end.date()
+            
+            with duckdb.connect(self.db_path) as conn:
+                summaries = conn.execute("""
+                    SELECT id, summary_date, total_snapshots, total_topics, summary_text
+                    FROM daily_hot_topic_summaries
+                    WHERE summary_date >= ? AND summary_date <= ?
+                    ORDER BY summary_date
+                """, [start_date, end_date]).fetchall()
+                
+                result = []
+                for summary_row in summaries:
+                    summary_id, summary_date, total_snapshots, total_topics, summary_text = summary_row
+                    
+                    topics = conn.execute("""
+                        SELECT rank, title, appear_count, best_rank, avg_hot_value, max_hot_value,
+                               first_appear_time, last_appear_time, is_persistent, persistence_reason
+                        FROM daily_hot_topic_items
+                        WHERE daily_summary_id = ?
+                        ORDER BY rank
+                    """, [summary_id]).fetchall()
+                    
+                    topic_list = []
+                    for row in topics:
+                        rank, title, appear_count, best_rank, avg_hot_value, max_hot_value, \
+                            first_appear_time, last_appear_time, is_persistent, persistence_reason = row
+                        
+                        topic_list.append({
+                            'rank': rank,
+                            'title': title,
+                            'appear_count': appear_count,
+                            'best_rank': best_rank,
+                            'avg_hot_value': avg_hot_value,
+                            'max_hot_value': max_hot_value,
+                            'first_appear_time': first_appear_time.isoformat() if first_appear_time else None,
+                            'last_appear_time': last_appear_time.isoformat() if last_appear_time else None,
+                            'is_persistent': is_persistent,
+                            'persistence_reason': persistence_reason
+                        })
+                    
+                    result.append({
+                        'summary_date': summary_date.isoformat(),
+                        'total_topics': total_topics,
+                        'summary_text': summary_text,
+                        'topics': topic_list
+                    })
+                
+                return result
+                
+        except Exception as e:
+            print(f"获取一周每日总结失败: {e}")
+            return []
+    
+    def save_weekly_hot_topic_summary(
+        self,
+        week_start: datetime,
+        week_end: datetime,
+        topics: List[Dict],
+        summary_text: str = None
+    ) -> Optional[int]:
+        """
+        保存每周热门话题总结结果
+        
+        Args:
+            week_start: 周开始日期
+            week_end: 周结束日期
+            topics: 热门话题列表，每个话题包含:
+                - rank: 排名
+                - title: 标题
+                - appear_days: 出现天数
+                - daily_appear_detail: 每日出现详情
+                - heat_trend: 热度趋势
+                - heat_evolution: 热度演变分析
+                - first_appear_date: 首次出现日期
+                - last_appear_date: 最后出现日期
+                - is_sustained: 是否为持续性话题
+                - sustained_reason: 持续性原因
+            summary_text: AI生成的总结文本
+            
+        Returns:
+            总结记录ID，如果保存失败返回None
+        """
+        try:
+            week_start_date = week_start.date()
+            week_end_date = week_end.date()
+            
+            with duckdb.connect(self.db_path) as conn:
+                existing = conn.execute("""
+                    SELECT id FROM weekly_hot_topic_summaries WHERE week_start_date = ? AND week_end_date = ?
+                """, [week_start_date, week_end_date]).fetchone()
+                
+                if existing:
+                    summary_id = existing[0]
+                    conn.execute("""
+                        DELETE FROM weekly_hot_topic_items WHERE weekly_summary_id = ?
+                    """, [summary_id])
+                    
+                    conn.execute("""
+                        UPDATE weekly_hot_topic_summaries 
+                        SET total_topics = ?, summary_text = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, [len(topics), summary_text, summary_id])
+                else:
+                    daily_count = conn.execute("""
+                        SELECT COUNT(*) FROM daily_hot_topic_summaries
+                        WHERE summary_date >= ? AND summary_date <= ?
+                    """, [week_start_date, week_end_date]).fetchone()[0]
+                    
+                    result = conn.execute("""
+                        INSERT INTO weekly_hot_topic_summaries 
+                        (week_start_date, week_end_date, total_daily_summaries, total_topics, summary_text, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        RETURNING id
+                    """, [week_start_date, week_end_date, daily_count, len(topics), summary_text]).fetchone()
+                    
+                    if not result:
+                        print("保存每周总结失败")
+                        return None
+                    
+                    summary_id = result[0]
+                
+                for topic in topics:
+                    daily_appear_detail_json = json.dumps(topic.get('daily_appear_detail', {}), ensure_ascii=False) if topic.get('daily_appear_detail') else None
+                    
+                    conn.execute("""
+                        INSERT INTO weekly_hot_topic_items 
+                        (weekly_summary_id, rank, title, appear_days, daily_appear_detail,
+                         heat_trend, heat_evolution, first_appear_date, last_appear_date,
+                         is_sustained, sustained_reason, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, [
+                        summary_id,
+                        topic.get('rank', 0),
+                        topic.get('title', ''),
+                        topic.get('appear_days', 0),
+                        daily_appear_detail_json,
+                        topic.get('heat_trend'),
+                        topic.get('heat_evolution'),
+                        topic.get('first_appear_date'),
+                        topic.get('last_appear_date'),
+                        topic.get('is_sustained', False),
+                        topic.get('sustained_reason')
+                    ])
+                
+                conn.commit()
+                
+                print(f"每周热门话题总结已保存: 周期={week_start_date} 到 {week_end_date}, 话题数={len(topics)}")
+                return summary_id
+                
+        except Exception as e:
+            print(f"保存每周热门话题总结失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def get_weekly_hot_topic_summary(self, week_start: datetime, week_end: datetime) -> Optional[Dict]:
+        """
+        获取指定周期的每周热门话题总结
+        
+        Args:
+            week_start: 周开始日期
+            week_end: 周结束日期
+            
+        Returns:
+            总结数据字典，如果不存在返回None
+        """
+        try:
+            week_start_date = week_start.date()
+            week_end_date = week_end.date()
+            
+            with duckdb.connect(self.db_path) as conn:
+                summary = conn.execute("""
+                    SELECT id, week_start_date, week_end_date, total_daily_summaries, total_topics, summary_text, created_at, updated_at
+                    FROM weekly_hot_topic_summaries
+                    WHERE week_start_date = ? AND week_end_date = ?
+                """, [week_start_date, week_end_date]).fetchone()
+                
+                if not summary:
+                    return None
+                
+                summary_id, start_date, end_date, total_daily_summaries, total_topics, summary_text, created_at, updated_at = summary
+                
+                topics = conn.execute("""
+                    SELECT rank, title, appear_days, daily_appear_detail, heat_trend, heat_evolution,
+                           first_appear_date, last_appear_date, is_sustained, sustained_reason
+                    FROM weekly_hot_topic_items
+                    WHERE weekly_summary_id = ?
+                    ORDER BY rank
+                """, [summary_id]).fetchall()
+                
+                topic_list = []
+                for row in topics:
+                    rank, title, appear_days, daily_appear_detail, heat_trend, heat_evolution, \
+                        first_appear_date, last_appear_date, is_sustained, sustained_reason = row
+                    
+                    daily_detail = {}
+                    if daily_appear_detail:
+                        try:
+                            daily_detail = json.loads(daily_appear_detail)
+                        except:
+                            pass
+                    
+                    topic_list.append({
+                        'rank': rank,
+                        'title': title,
+                        'appear_days': appear_days,
+                        'daily_appear_detail': daily_detail,
+                        'heat_trend': heat_trend,
+                        'heat_evolution': heat_evolution,
+                        'first_appear_date': first_appear_date.isoformat() if first_appear_date else None,
+                        'last_appear_date': last_appear_date.isoformat() if last_appear_date else None,
+                        'is_sustained': is_sustained,
+                        'sustained_reason': sustained_reason
+                    })
+                
+                return {
+                    'id': summary_id,
+                    'week_start_date': start_date.isoformat(),
+                    'week_end_date': end_date.isoformat(),
+                    'total_daily_summaries': total_daily_summaries,
+                    'total_topics': total_topics,
+                    'summary_text': summary_text,
+                    'topics': topic_list,
+                    'created_at': created_at.isoformat() if created_at else None,
+                    'updated_at': updated_at.isoformat() if updated_at else None
+                }
+                
+        except Exception as e:
+            print(f"获取每周热门话题总结失败: {e}")
+            return None
+    
+    def clear_daily_hot_topics(self) -> bool:
+        """
+        清空每日热门话题总结相关的数据表
+        
+        Returns:
+            是否成功
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM daily_hot_topic_items")
+                conn.execute("DELETE FROM daily_hot_topic_summaries")
+                conn.commit()
+                
+                print("已清空每日热门话题总结相关数据表")
+                return True
+                
+        except Exception as e:
+            print(f"清空每日热门话题总结数据表失败: {e}")
+            return False
+    
+    def clear_weekly_hot_topics(self) -> bool:
+        """
+        清空每周热门话题总结相关的数据表
+        
+        Returns:
+            是否成功
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM weekly_hot_topic_items")
+                conn.execute("DELETE FROM weekly_hot_topic_summaries")
+                conn.commit()
+                
+                print("已清空每周热门话题总结相关数据表")
+                return True
+                
+        except Exception as e:
+            print(f"清空每周热门话题总结数据表失败: {e}")
+            return False
+    
+    def clear_all_hot_topic_summaries(self) -> bool:
+        """
+        清空所有热门话题总结相关的数据表（每日和每周）
+        
+        Returns:
+            是否成功
+        """
+        daily_success = self.clear_daily_hot_topics()
+        weekly_success = self.clear_weekly_hot_topics()
+        
+        return daily_success and weekly_success
 
 
 def main():
