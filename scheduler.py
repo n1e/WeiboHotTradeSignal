@@ -278,3 +278,328 @@ def run_with_scheduler(config: Dict[str, Any], task_func: Callable,
     else:
         logger.info("使用单次执行模式")
         return scheduler.run_once()
+
+
+class SummaryTaskScheduler:
+    """
+    热门话题总结任务调度器
+    支持每日和每周定时任务
+    """
+    
+    def __init__(self, config: Dict[str, Any]):
+        """
+        初始化总结任务调度器
+        
+        Args:
+            config: 配置字典
+        """
+        self.config = config
+        self.summary_config = config.get('summary', {})
+        
+        self.daily_enabled = self.summary_config.get('daily', {}).get('enabled', True)
+        self.daily_time = self.summary_config.get('daily', {}).get('time', '22:00')
+        
+        self.weekly_enabled = self.summary_config.get('weekly', {}).get('enabled', True)
+        self.weekly_time = self.summary_config.get('weekly', {}).get('time', '23:00')
+        self.weekly_day = self.summary_config.get('weekly', {}).get('day', 6)
+        
+        self._stop_event = Event()
+        self._running = False
+        
+        self._last_daily_run_date = None
+        self._last_weekly_run_week = None
+        
+        self._parse_time_configs()
+        self._setup_signal_handlers()
+        
+        logger.info(f"总结任务调度器初始化完成")
+        logger.info(f"  每日总结: {'启用' if self.daily_enabled else '禁用'}，时间: {self.daily_time}")
+        logger.info(f"  每周总结: {'启用' if self.weekly_enabled else '禁用'}，时间: 周{['一','二','三','四','五','六','日'][self.weekly_day]} {self.weekly_time}")
+    
+    def _parse_time_configs(self):
+        """解析时间配置"""
+        try:
+            hour, minute = map(int, self.daily_time.split(':'))
+            self.daily_hour = hour
+            self.daily_minute = minute
+        except:
+            logger.warning(f"解析每日时间配置失败: {self.daily_time}，使用默认值 22:00")
+            self.daily_hour = 22
+            self.daily_minute = 0
+        
+        try:
+            hour, minute = map(int, self.weekly_time.split(':'))
+            self.weekly_hour = hour
+            self.weekly_minute = minute
+        except:
+            logger.warning(f"解析每周时间配置失败: {self.weekly_time}，使用默认值 23:00")
+            self.weekly_hour = 23
+            self.weekly_minute = 0
+    
+    def _setup_signal_handlers(self):
+        """设置信号处理器"""
+        def handle_signal(signum, frame):
+            logger.info(f"收到信号 {signum}，准备停止总结任务调度器...")
+            self.stop()
+        
+        signal.signal(signal.SIGINT, handle_signal)
+        signal.signal(signal.SIGTERM, handle_signal)
+    
+    def is_daily_task_time(self) -> bool:
+        """
+        检查是否到达每日总结任务时间
+        
+        Returns:
+            是否到达执行时间
+        """
+        if not self.daily_enabled:
+            return False
+        
+        now = datetime.now()
+        current_date = now.date()
+        
+        if self._last_daily_run_date == current_date:
+            return False
+        
+        if now.hour == self.daily_hour and now.minute >= self.daily_minute:
+            return True
+        
+        return False
+    
+    def is_weekly_task_time(self) -> bool:
+        """
+        检查是否到达每周总结任务时间
+        
+        Returns:
+            是否到达执行时间
+        """
+        if not self.weekly_enabled:
+            return False
+        
+        now = datetime.now()
+        current_week = now.isocalendar()[1]
+        
+        if self._last_weekly_run_week == current_week:
+            return False
+        
+        if now.weekday() == self.weekly_day:
+            if now.hour == self.weekly_hour and now.minute >= self.weekly_minute:
+                return True
+        
+        return False
+    
+    def run_daily_summary_task(self) -> Dict[str, Any]:
+        """
+        执行每日总结任务
+        
+        Returns:
+            执行结果
+        """
+        from topic_summarizer import TopicSummarizer
+        
+        run_id = f"daily_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        start_time = datetime.now()
+        
+        result = {
+            'run_id': run_id,
+            'task_type': 'daily',
+            'start_time': start_time.isoformat(),
+            'end_time': None,
+            'success': False,
+            'details': {}
+        }
+        
+        try:
+            log_step("每日总结", f"开始执行每日总结任务 - 运行ID: {run_id}")
+            
+            summarizer = TopicSummarizer(self.config)
+            summary_result = summarizer.run_daily_summary()
+            
+            if summary_result:
+                result['success'] = True
+                result['details']['summary_id'] = summary_result.get('summary_id')
+                result['details']['topics_count'] = summary_result.get('total_topics', 0)
+                self._last_daily_run_date = datetime.now().date()
+                log_step("每日总结", f"每日总结任务执行成功")
+            else:
+                result['success'] = False
+                result['details']['error'] = "每日总结分析失败"
+                log_error("每日总结", "每日总结分析失败")
+        
+        except Exception as e:
+            result['success'] = False
+            result['details']['error'] = str(e)
+            log_error("每日总结", f"每日总结任务执行失败: {e}", e)
+        
+        end_time = datetime.now()
+        result['end_time'] = end_time.isoformat()
+        result['duration_seconds'] = (end_time - start_time).total_seconds()
+        
+        return result
+    
+    def run_weekly_summary_task(self) -> Dict[str, Any]:
+        """
+        执行每周总结任务
+        
+        Returns:
+            执行结果
+        """
+        from topic_summarizer import TopicSummarizer
+        
+        run_id = f"weekly_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        start_time = datetime.now()
+        
+        result = {
+            'run_id': run_id,
+            'task_type': 'weekly',
+            'start_time': start_time.isoformat(),
+            'end_time': None,
+            'success': False,
+            'details': {}
+        }
+        
+        try:
+            log_step("每周总结", f"开始执行每周总结任务 - 运行ID: {run_id}")
+            
+            summarizer = TopicSummarizer(self.config)
+            summary_result = summarizer.run_weekly_summary()
+            
+            if summary_result:
+                result['success'] = True
+                result['details']['summary_id'] = summary_result.get('summary_id')
+                result['details']['topics_count'] = summary_result.get('total_topics', 0)
+                self._last_weekly_run_week = datetime.now().isocalendar()[1]
+                log_step("每周总结", f"每周总结任务执行成功")
+            else:
+                result['success'] = False
+                result['details']['error'] = "每周总结分析失败"
+                log_error("每周总结", "每周总结分析失败")
+        
+        except Exception as e:
+            result['success'] = False
+            result['details']['error'] = str(e)
+            log_error("每周总结", f"每周总结任务执行失败: {e}", e)
+        
+        end_time = datetime.now()
+        result['end_time'] = end_time.isoformat()
+        result['duration_seconds'] = (end_time - start_time).total_seconds()
+        
+        return result
+    
+    def start(self):
+        """启动总结任务调度器"""
+        logger.info("=" * 60)
+        logger.info("总结任务调度器启动")
+        logger.info("=" * 60)
+        
+        self._running = True
+        self._stop_event.clear()
+        
+        while self._running and not self._stop_event.is_set():
+            try:
+                now = datetime.now()
+                
+                if self.is_daily_task_time():
+                    logger.info(f"到达每日总结任务时间 ({self.daily_time})，开始执行...")
+                    self.run_daily_summary_task()
+                
+                if self.is_weekly_task_time():
+                    logger.info(f"到达每周总结任务时间 (周{['一','二','三','四','五','六','日'][self.weekly_day]} {self.weekly_time})，开始执行...")
+                    self.run_weekly_summary_task()
+                
+                logger.info("总结任务调度器进入等待状态，60秒后再次检查...")
+                self._stop_event.wait(60)
+            
+            except Exception as e:
+                log_error("总结任务调度器", f"调度循环发生异常: {e}", e)
+                logger.info("等待 60 秒后继续...")
+                self._stop_event.wait(60)
+        
+        logger.info("总结任务调度器已停止")
+    
+    def stop(self):
+        """停止总结任务调度器"""
+        logger.info("正在停止总结任务调度器...")
+        self._running = False
+        self._stop_event.set()
+
+
+class CombinedScheduler:
+    """
+    综合调度器
+    同时运行常规任务调度器和总结任务调度器
+    """
+    
+    def __init__(self, config: Dict[str, Any], task_func: Optional[Callable] = None):
+        """
+        初始化综合调度器
+        
+        Args:
+            config: 配置字典
+            task_func: 常规任务函数
+        """
+        self.config = config
+        self.task_func = task_func
+        
+        self._stop_event = Event()
+        self._running = False
+        
+        self.regular_scheduler = None
+        self.summary_scheduler = None
+        
+        if task_func:
+            schedule_config = config.get('schedule', {})
+            self.regular_scheduler = TaskScheduler(schedule_config, task_func)
+        
+        self.summary_scheduler = SummaryTaskScheduler(config)
+    
+    def start(self):
+        """启动所有调度器"""
+        import threading
+        
+        logger.info("=" * 60)
+        logger.info("综合调度器启动")
+        logger.info("=" * 60)
+        
+        self._running = True
+        self._stop_event.clear()
+        
+        def run_regular_scheduler():
+            if self.regular_scheduler and self.regular_scheduler.enabled:
+                self.regular_scheduler.start()
+        
+        def run_summary_scheduler():
+            if self.summary_scheduler:
+                self.summary_scheduler.start()
+        
+        regular_thread = None
+        if self.regular_scheduler:
+            regular_thread = threading.Thread(target=run_regular_scheduler, daemon=True)
+            regular_thread.start()
+            logger.info("常规任务调度器线程已启动")
+        
+        summary_thread = threading.Thread(target=run_summary_scheduler, daemon=True)
+        summary_thread.start()
+        logger.info("总结任务调度器线程已启动")
+        
+        while self._running and not self._stop_event.is_set():
+            try:
+                self._stop_event.wait(1)
+            except KeyboardInterrupt:
+                logger.info("收到键盘中断信号，准备停止...")
+                self.stop()
+                break
+        
+        logger.info("综合调度器已停止")
+    
+    def stop(self):
+        """停止所有调度器"""
+        logger.info("正在停止综合调度器...")
+        self._running = False
+        self._stop_event.set()
+        
+        if self.regular_scheduler:
+            self.regular_scheduler.stop()
+        
+        if self.summary_scheduler:
+            self.summary_scheduler.stop()

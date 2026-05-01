@@ -15,7 +15,7 @@ from weibo_scraper import WeiboScraper
 from ai_analyzer import AIAnalyzer
 from report_generator import ReportGenerator
 from logger import setup_logger, get_logger, log_step, log_error, log_push_result
-from scheduler import TaskScheduler, run_with_scheduler
+from scheduler import TaskScheduler, run_with_scheduler, CombinedScheduler
 from pusher.manager import PushManager, get_push_manager, reset_push_manager
 
 
@@ -442,6 +442,120 @@ def run_test_mode(config):
     }
 
 
+def run_daily_summary(config, target_date_str: str = None):
+    """
+    执行每日热门话题总结
+    
+    Args:
+        config: 配置
+        target_date_str: 目标日期字符串，格式为 YYYY-MM-DD
+        
+    Returns:
+        执行结果
+    """
+    from topic_summarizer import TopicSummarizer
+    from datetime import datetime, timedelta
+    
+    log_step("每日总结", "开始执行每日热门话题总结...")
+    
+    if target_date_str:
+        try:
+            target_date = datetime.strptime(target_date_str, '%Y-%m-%d')
+        except ValueError as e:
+            logger.error(f"日期格式错误: {e}，请使用 YYYY-MM-DD 格式")
+            return None
+    else:
+        target_date = datetime.now() - timedelta(days=1)
+    
+    summarizer = TopicSummarizer(config)
+    result = summarizer.run_daily_summary(target_date)
+    
+    if result:
+        logger.info("=" * 60)
+        logger.info("每日热门话题总结执行完成！")
+        logger.info(f"总结日期: {target_date.strftime('%Y-%m-%d')}")
+        logger.info(f"话题数量: {result.get('total_topics', 0)}")
+        logger.info("=" * 60)
+        
+        topics = result.get('topics', [])
+        if topics:
+            logger.info("\n热门话题列表:")
+            for idx, topic in enumerate(topics[:10]):
+                persistent_str = " [持久话题]" if topic.get('is_persistent') else ""
+                logger.info(f"  {topic.get('rank', idx+1)}. {topic.get('title')}{persistent_str}")
+                logger.info(f"     出现次数: {topic.get('appear_count')}次, 最佳排名: 第{topic.get('best_rank', 'N/A')}名")
+                if topic.get('persistence_reason'):
+                    logger.info(f"     原因: {topic.get('persistence_reason')}")
+        
+        return result
+    else:
+        logger.warning("每日热门话题总结执行失败")
+        return None
+
+
+def run_weekly_summary(config, week_start_str: str = None, week_end_str: str = None):
+    """
+    执行每周热门话题总结
+    
+    Args:
+        config: 配置
+        week_start_str: 周开始日期字符串，格式为 YYYY-MM-DD
+        week_end_str: 周结束日期字符串，格式为 YYYY-MM-DD
+        
+    Returns:
+        执行结果
+    """
+    from topic_summarizer import TopicSummarizer
+    from datetime import datetime, timedelta
+    
+    log_step("每周总结", "开始执行每周热门话题总结...")
+    
+    week_start = None
+    week_end = None
+    
+    if week_start_str and week_end_str:
+        try:
+            week_start = datetime.strptime(week_start_str, '%Y-%m-%d')
+            week_end = datetime.strptime(week_end_str, '%Y-%m-%d')
+        except ValueError as e:
+            logger.error(f"日期格式错误: {e}，请使用 YYYY-MM-DD 格式")
+            return None
+    else:
+        today = datetime.now()
+        weekday = today.weekday()
+        
+        week_end = today - timedelta(days=weekday + 1)
+        week_start = week_end - timedelta(days=6)
+    
+    week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_end = week_end.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    summarizer = TopicSummarizer(config)
+    result = summarizer.run_weekly_summary(week_start, week_end)
+    
+    if result:
+        logger.info("=" * 60)
+        logger.info("每周热门话题总结执行完成！")
+        logger.info(f"总结周期: {week_start.strftime('%Y-%m-%d')} 至 {week_end.strftime('%Y-%m-%d')}")
+        logger.info(f"话题数量: {result.get('total_topics', 0)}")
+        logger.info("=" * 60)
+        
+        topics = result.get('topics', [])
+        if topics:
+            logger.info("\n持续性热门话题列表:")
+            for idx, topic in enumerate(topics[:10]):
+                sustained_str = " [持续话题]" if topic.get('is_sustained') else ""
+                logger.info(f"  {topic.get('rank', idx+1)}. {topic.get('title')}{sustained_str}")
+                logger.info(f"     出现天数: {topic.get('appear_days')}天, 热度趋势: {topic.get('heat_trend', 'N/A')}")
+                if topic.get('sustained_reason'):
+                    logger.info(f"     原因: {topic.get('sustained_reason')}")
+        
+        return result
+    else:
+        logger.warning("每周热门话题总结执行失败")
+        return None
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='微博热搜交易信号分析器')
@@ -451,8 +565,15 @@ def main():
     parser.add_argument('--skip-report', action='store_true', help='跳过报告生成')
     parser.add_argument('--skip-push', action='store_true', help='跳过推送')
     parser.add_argument('--test', action='store_true', help='使用测试数据运行')
-    parser.add_argument('--daemon', action='store_true', help='以守护进程模式运行（定时调度）')
+    parser.add_argument('--daemon', action='store_true', help='以守护进程模式运行（定时调度，包含常规任务和总结任务）')
     parser.add_argument('--once', action='store_true', help='仅执行一次（默认）')
+    
+    summary_group = parser.add_argument_group('总结任务参数（独立调用时使用）')
+    summary_group.add_argument('--daily-summary', action='store_true', help='执行每日热门话题总结')
+    summary_group.add_argument('--weekly-summary', action='store_true', help='执行每周热门话题总结')
+    summary_group.add_argument('--summary-date', type=str, help='指定每日总结的日期，格式为 YYYY-MM-DD（默认为昨天）')
+    summary_group.add_argument('--week-start', type=str, help='指定每周总结的开始日期，格式为 YYYY-MM-DD')
+    summary_group.add_argument('--week-end', type=str, help='指定每周总结的结束日期，格式为 YYYY-MM-DD')
     
     args = parser.parse_args()
     
@@ -472,6 +593,26 @@ def main():
     
     init_logging(config)
     
+    if args.daily_summary:
+        logger.info("\n⚠️  执行每日热门话题总结模式")
+        result = run_daily_summary(config, args.summary_date)
+        if result:
+            logger.info("执行成功！")
+            sys.exit(0)
+        else:
+            logger.error("执行失败！")
+            sys.exit(1)
+    
+    if args.weekly_summary:
+        logger.info("\n⚠️  执行每周热门话题总结模式")
+        result = run_weekly_summary(config, args.week_start, args.week_end)
+        if result:
+            logger.info("执行成功！")
+            sys.exit(0)
+        else:
+            logger.error("执行失败！")
+            sys.exit(1)
+    
     if args.test:
         logger.info("\n⚠️  测试模式：将使用模拟数据运行")
         run_test_mode(config)
@@ -484,15 +625,10 @@ def main():
     use_scheduler = args.daemon and not args.once
     
     if use_scheduler:
-        logger.info("启动调度器模式...")
+        logger.info("启动综合调度器模式（包含常规任务和总结任务）...")
         task_func = create_task_func(config, args)
-        schedule_config = config.get('schedule', {})
         
-        if not schedule_config.get('enabled', True):
-            logger.warning("调度器已在配置中禁用，退出")
-            sys.exit(0)
-        
-        scheduler = TaskScheduler(schedule_config, task_func)
+        scheduler = CombinedScheduler(config, task_func)
         scheduler.start()
     else:
         logger.info("启动单次执行模式...")
