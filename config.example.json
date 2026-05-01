@@ -30,8 +30,7 @@
       "enabled": true,
       "app_id": "your_feishu_app_id",
       "app_secret": "your_feishu_app_secret",
-      "chat_id": "your_feishu_chat_id",
-      "webhook_url": ""
+      "chat_id": "your_feishu_chat_id"
     }
   },
   "logging": {
