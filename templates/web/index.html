@@ -1,0 +1,246 @@
+{% extends "web/base.html" %}
+
+{% block title %}首页 - 微博热搜交易信号分析器{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-gradient">
+            <h4 class="alert-heading"><i class="bi bi-info-circle me-2"></i>欢迎使用微博热搜交易信号分析器</h4>
+            <p class="mb-0">实时监控微博热搜，通过AI智能分析发现潜在的股票交易机会。</p>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card">
+            <div class="stat-icon text-primary">
+                <i class="bi bi-database"></i>
+            </div>
+            <div class="stat-value" id="snapshotCount">--</div>
+            <div class="stat-label">快照总数</div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card">
+            <div class="stat-icon text-success">
+                <i class="bi bi-fire"></i>
+            </div>
+            <div class="stat-value" id="itemCount">--</div>
+            <div class="stat-label">热搜项总数</div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card">
+            <div class="stat-icon text-warning">
+                <i class="bi bi-clock-history"></i>
+            </div>
+            <div class="stat-value" id="lastSnapshotTime">--</div>
+            <div class="stat-label">最后快照时间</div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card">
+            <div class="stat-icon text-info">
+                <i class="bi bi-activity"></i>
+            </div>
+            <div class="stat-value" id="taskStatus">--</div>
+            <div class="stat-label">任务状态</div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-lightning-charge me-2"></i>最新热搜 TOP 10</span>
+                <a href="/realtime" class="btn btn-sm btn-light">查看全部 <i class="bi bi-arrow-right ms-1"></i></a>
+            </div>
+            <div class="card-body" id="latestHotList">
+                <div class="loading-spinner">
+                    <div class="spinner-border" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-stars me-2"></i>最新AI分析</span>
+                <a href="/realtime" class="btn btn-sm btn-light">查看详情 <i class="bi bi-arrow-right ms-1"></i></a>
+            </div>
+            <div class="card-body" id="latestAnalysis">
+                <div class="loading-spinner">
+                    <div class="spinner-border" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-grid-3x3-gap me-2"></i>功能导航
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <a href="/realtime" class="text-decoration-none">
+                            <div class="card h-100 hover-shadow">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-lightning-charge text-primary display-4 mb-3"></i>
+                                    <h5>实时热搜</h5>
+                                    <p class="text-muted small mb-0">查看最新的微博热搜数据及AI分析结果</p>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <a href="/intraday" class="text-decoration-none">
+                            <div class="card h-100 hover-shadow">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-bar-chart-line text-success display-4 mb-3"></i>
+                                    <h5>日内变化</h5>
+                                    <p class="text-muted small mb-0">查看日内热搜排名变化趋势和图表</p>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <a href="/summary" class="text-decoration-none">
+                            <div class="card h-100 hover-shadow">
+                                <div class="card-body text-center p-4">
+                                    <i class="bi bi-journal-text text-warning display-4 mb-3"></i>
+                                    <h5>总结资讯</h5>
+                                    <p class="text-muted small mb-0">查看每日和每周的热门话题总结</p>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function loadDashboardData() {
+    try {
+        const [latestData, taskStatus] = await Promise.all([
+            apiCall('/api/latest'),
+            apiCall('/api/task/status')
+        ]);
+        
+        document.getElementById('snapshotCount').textContent = latestData.snapshot_count || 0;
+        document.getElementById('itemCount').textContent = latestData.item_count || 0;
+        
+        if (latestData.snapshot && latestData.snapshot.timestamp) {
+            const timeStr = formatDateTime(latestData.snapshot.timestamp);
+            document.getElementById('lastSnapshotTime').textContent = timeStr.split(' ')[1];
+        }
+        
+        const statusEl = document.getElementById('taskStatus');
+        if (taskStatus.running) {
+            statusEl.innerHTML = '<span class="text-warning">运行中</span>';
+        } else {
+            statusEl.innerHTML = '<span class="text-success">空闲</span>';
+        }
+        
+        renderHotList(latestData.snapshot);
+        renderAnalysis(latestData.analysis);
+        
+    } catch (error) {
+        console.error('加载数据失败:', error);
+        document.getElementById('latestHotList').innerHTML = '<div class="text-center text-muted py-4">加载数据失败</div>';
+        document.getElementById('latestAnalysis').innerHTML = '<div class="text-center text-muted py-4">加载数据失败</div>';
+    }
+}
+
+function renderHotList(snapshot) {
+    const container = document.getElementById('latestHotList');
+    
+    if (!snapshot || !snapshot.hot_list || snapshot.hot_list.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>暂无热搜数据</p></div>';
+        return;
+    }
+    
+    const top10 = snapshot.hot_list.slice(0, 10);
+    
+    let html = '<div class="table-responsive"><table class="table table-hover">';
+    html += '<thead><tr><th>排名</th><th>热搜标题</th><th>热度</th></tr></thead><tbody>';
+    
+    top10.forEach(item => {
+        const badgeClass = item.rank <= 3 ? 'rank-top-3' : 'rank-other';
+        html += `<tr>
+            <td><span class="rank-badge ${badgeClass}">${item.rank}</span></td>
+            <td>${item.title}</td>
+            <td><span class="hot-value">${item.hot || '-'}</span></td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function renderAnalysis(analysis) {
+    const container = document.getElementById('latestAnalysis');
+    
+    if (!analysis) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-robot"></i><p>暂无AI分析结果</p></div>';
+        return;
+    }
+    
+    const stock = analysis.stock_analysis || {};
+    const opportunities = stock.stock_opportunities || [];
+    
+    if (opportunities.length === 0) {
+        if (stock.summary) {
+            container.innerHTML = `
+                <div class="p-3">
+                    <h6 class="text-primary mb-2"><i class="bi bi-chat-left-text me-1"></i>分析总结</h6>
+                    <p class="text-muted small mb-0">${stock.summary}</p>
+                </div>
+            `;
+        } else {
+            container.innerHTML = '<div class="empty-state"><i class="bi bi-robot"></i><p>暂无交易信号</p></div>';
+        }
+        return;
+    }
+    
+    let html = '';
+    opportunities.slice(0, 2).forEach(opp => {
+        const signalClass = opp.signal_type === '买入信号' ? 'signal-buy' : 
+                           opp.signal_type === '卖出信号' ? 'signal-sell' : 'signal-watch';
+        html += `
+            <div class="trend-item trend-new mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong>${opp.event}</strong>
+                    <span class="badge ${signalClass}">${opp.signal_type}</span>
+                </div>
+                <p class="text-muted small mb-2">${opp.analysis || ''}</p>
+                ${opp.related_industries ? `
+                    <div class="mb-2">
+                        ${opp.related_industries.map(ind => `<span class="industry-tag">${ind}</span>`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+    
+    if (opportunities.length > 2) {
+        html += `<p class="text-center text-muted small">还有 ${opportunities.length - 2} 条交易信号...</p>`;
+    }
+    
+    container.innerHTML = html;
+}
+
+loadDashboardData();
+</script>
+{% endblock %}

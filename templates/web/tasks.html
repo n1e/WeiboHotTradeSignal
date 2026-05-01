@@ -1,0 +1,421 @@
+{% extends "web/base.html" %}
+
+{% block title %}任务管理 - 微博热搜交易信号分析器{% endblock %}
+
+{% block extra_css %}
+<style>
+    .task-card {
+        margin-bottom: 15px;
+    }
+    
+    .task-card.running {
+        border-left: 4px solid #f59e0b !important;
+        animation: pulse 2s infinite;
+    }
+    
+    .task-card.success {
+        border-left: 4px solid #10b981 !important;
+    }
+    
+    .task-card.error {
+        border-left: 4px solid #ef4444 !important;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+    
+    .status-badge {
+        font-size: 0.85rem;
+        padding: 4px 12px;
+    }
+    
+    .status-running {
+        background: #fef3c7;
+        color: #d97706;
+    }
+    
+    .status-success {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .status-error {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .task-type-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+    }
+    
+    .type-full {
+        background: #e0e7ff;
+        color: #4338ca;
+    }
+    
+    .type-daily {
+        background: #dcfce7;
+        color: #166534;
+    }
+    
+    .type-weekly {
+        background: #fce7f3;
+        color: #9d174d;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-gear me-2"></i>任务状态
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="d-flex align-items-center">
+                            <div class="me-3">
+                                <i class="bi bi-cpu text-primary" style="font-size: 2rem;"></i>
+                            </div>
+                            <div>
+                                <h6 class="mb-1">当前状态</h6>
+                                <span id="currentStatus" class="status-badge rounded-pill">检查中...</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-flex align-items-center">
+                            <div class="me-3">
+                                <i class="bi bi-list-ol text-success" style="font-size: 2rem;"></i>
+                            </div>
+                            <div>
+                                <h6 class="mb-1">历史任务数</h6>
+                                <span id="historyCount" class="h4 text-success mb-0">--</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-gradient" onclick="refreshStatus()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>刷新状态
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-play-circle me-2"></i>执行任务
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <div class="card hover-shadow h-100">
+                            <div class="card-body text-center p-4">
+                                <div class="task-type-icon type-full mx-auto mb-3">
+                                    <i class="bi bi-lightning-charge"></i>
+                                </div>
+                                <h5>完整任务</h5>
+                                <p class="text-muted small mb-3">
+                                    执行完整流程：数据采集 + AI分析 + 报告生成
+                                </p>
+                                <button class="btn btn-primary btn-gradient" onclick="runTask('full')" id="btn-full">
+                                    <i class="bi bi-play me-1"></i>执行
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <div class="card hover-shadow h-100">
+                            <div class="card-body text-center p-4">
+                                <div class="task-type-icon type-daily mx-auto mb-3">
+                                    <i class="bi bi-calendar-day"></i>
+                                </div>
+                                <h5>每日总结</h5>
+                                <p class="text-muted small mb-3">
+                                    生成今日热门话题总结分析（需要先有当天数据）
+                                </p>
+                                <button class="btn btn-success" onclick="runTask('daily_summary')" id="btn-daily">
+                                    <i class="bi bi-play me-1"></i>执行
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <div class="card hover-shadow h-100">
+                            <div class="card-body text-center p-4">
+                                <div class="task-type-icon type-weekly mx-auto mb-3">
+                                    <i class="bi bi-calendar-week"></i>
+                                </div>
+                                <h5>每周总结</h5>
+                                <p class="text-muted small mb-3">
+                                    生成本周热门话题总结分析（需要先有本周数据）
+                                </p>
+                                <button class="btn btn-info text-white" onclick="runTask('weekly_summary')" id="btn-weekly">
+                                    <i class="bi bi-play me-1"></i>执行
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clock-history me-2"></i>任务历史记录</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadHistory()">
+                    <i class="bi bi-arrow-repeat me-1"></i>刷新
+                </button>
+            </div>
+            <div class="card-body" id="historyContainer">
+                <div class="loading-spinner">
+                    <div class="spinner-border" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let isRunning = false;
+
+async function refreshStatus() {
+    try {
+        const result = await apiCall('/api/task/status');
+        
+        isRunning = result.running;
+        const statusEl = document.getElementById('currentStatus');
+        const countEl = document.getElementById('historyCount');
+        
+        if (result.running) {
+            statusEl.className = 'status-badge rounded-pill status-running';
+            statusEl.innerHTML = '<i class="bi bi-cpu me-1"></i>运行中';
+        } else {
+            statusEl.className = 'status-badge rounded-pill status-success';
+            statusEl.innerHTML = '<i class="bi bi-check-circle me-1"></i>空闲';
+        }
+        
+        countEl.textContent = result.history?.length || 0;
+        
+        updateButtonStates();
+        renderHistory(result.history || []);
+        
+    } catch (error) {
+        console.error('刷新状态失败:', error);
+    }
+}
+
+async function loadHistory() {
+    const container = document.getElementById('historyContainer');
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    
+    try {
+        const result = await apiCall('/api/task/status');
+        renderHistory(result.history || []);
+    } catch (error) {
+        console.error('加载历史失败:', error);
+        container.innerHTML = '<div class="text-center text-danger py-4">加载历史失败</div>';
+    }
+}
+
+function renderHistory(history) {
+    const container = document.getElementById('historyContainer');
+    
+    if (!history || history.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="bi bi-inbox"></i>
+                <p>暂无任务历史记录</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    
+    history.slice(0, 50).forEach(task => {
+        const typeMap = {
+            'full': { name: '完整任务', icon: 'bi-lightning-charge', class: 'type-full' },
+            'daily_summary': { name: '每日总结', icon: 'bi-calendar-day', class: 'type-daily' },
+            'weekly_summary': { name: '每周总结', icon: 'bi-calendar-week', class: 'type-weekly' }
+        };
+        
+        const typeInfo = typeMap[task.type] || { name: task.type || '未知', icon: 'bi-question-circle', class: '' };
+        
+        let statusClass = 'success';
+        let statusText = '成功';
+        let statusIcon = 'bi-check-circle';
+        
+        if (task.type === 'running') {
+            statusClass = 'running';
+            statusText = '运行中';
+            statusIcon = 'bi-cpu';
+        } else if (!task.success) {
+            statusClass = 'error';
+            statusText = '失败';
+            statusIcon = 'bi-x-circle';
+        }
+        
+        const duration = task.duration ? `${task.duration.toFixed(2)}秒` : '-';
+        
+        html += `
+            <div class="card task-card ${statusClass}">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <div class="task-type-icon ${typeInfo.class} me-3">
+                            <i class="bi ${typeInfo.icon}"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="mb-1">${typeInfo.name}</h6>
+                                    <small class="text-muted">
+                                        <i class="bi bi-calendar me-1"></i>
+                                        开始: ${task.start_time ? formatDateTime(task.start_time) : '-'}
+                                        ${task.end_time ? ` | 结束: ${formatDateTime(task.end_time)}` : ''}
+                                        ${task.duration ? ` | 耗时: ${duration}` : ''}
+                                    </small>
+                                </div>
+                                <span class="status-badge rounded-pill status-${statusClass}">
+                                    <i class="bi ${statusIcon} me-1"></i>${statusText}
+                                </span>
+                            </div>
+                            ${task.details ? `
+                                <div class="mt-2">
+                                    ${renderTaskDetails(task.details)}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function renderTaskDetails(details) {
+    if (!details) return '';
+    
+    let html = '<div class="small text-muted">';
+    
+    if (details.task_result) {
+        const result = details.task_result;
+        if (result.html_path) {
+            html += `<p class="mb-1"><i class="bi bi-file-earmark-text me-1"></i>报告: ${result.html_path}</p>`;
+        }
+        if (result.json_path) {
+            html += `<p class="mb-1"><i class="bi bi-file-earmark-code me-1"></i>分析结果: ${result.json_path}</p>`;
+        }
+        if (result.success === false && result.error) {
+            html += `<p class="mb-0 text-danger"><i class="bi bi-exclamation-triangle me-1"></i>错误: ${result.error}</p>`;
+        }
+    }
+    
+    if (details.topics_count !== undefined) {
+        html += `<p class="mb-0"><i class="bi bi-fire me-1"></i>话题数量: ${details.topics_count}</p>`;
+    }
+    
+    if (details.error) {
+        html += `<p class="mb-0 text-danger"><i class="bi bi-exclamation-triangle me-1"></i>错误: ${details.error}</p>`;
+    }
+    
+    if (details.message) {
+        html += `<p class="mb-0"><i class="bi bi-info-circle me-1"></i>${details.message}</p>`;
+    }
+    
+    html += '</div>';
+    return html;
+}
+
+function updateButtonStates() {
+    const buttons = ['btn-full', 'btn-daily', 'btn-weekly'];
+    buttons.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.disabled = isRunning;
+            if (isRunning) {
+                btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>运行中...';
+            } else {
+                const originalTexts = {
+                    'btn-full': '<i class="bi bi-play me-1"></i>执行',
+                    'btn-daily': '<i class="bi bi-play me-1"></i>执行',
+                    'btn-weekly': '<i class="bi bi-play me-1"></i>执行'
+                };
+                btn.innerHTML = originalTexts[id] || '<i class="bi bi-play me-1"></i>执行';
+            }
+        }
+    });
+}
+
+async function runTask(taskType) {
+    if (isRunning) {
+        alert('已有任务正在执行中，请等待完成。');
+        return;
+    }
+    
+    const taskNames = {
+        'full': '完整任务',
+        'daily_summary': '每日总结',
+        'weekly_summary': '每周总结'
+    };
+    
+    if (!confirm(`确定要执行"${taskNames[taskType]}"吗？\n\n这可能需要一些时间，请耐心等待。`)) {
+        return;
+    }
+    
+    isRunning = true;
+    updateButtonStates();
+    
+    try {
+        const result = await apiCall('/api/task/run', {
+            method: 'POST',
+            body: JSON.stringify({ type: taskType })
+        });
+        
+        if (result.success) {
+            alert(`${taskNames[taskType]}执行成功！`);
+        } else {
+            alert(`${taskNames[taskType]}执行失败: ${result.error || '未知错误'}`);
+        }
+        
+    } catch (error) {
+        console.error('执行任务失败:', error);
+        alert(`执行任务失败: ${error.message}`);
+    } finally {
+        isRunning = false;
+        refreshStatus();
+    }
+}
+
+refreshStatus();
+
+setInterval(() => {
+    if (isRunning) {
+        refreshStatus();
+    }
+}, 5000);
+</script>
+{% endblock %}

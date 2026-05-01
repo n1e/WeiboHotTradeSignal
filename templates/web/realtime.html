@@ -1,0 +1,425 @@
+{% extends "web/base.html" %}
+
+{% block title %}实时热搜 - 微博热搜交易信号分析器{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-lightning-charge me-2"></i>实时热搜数据</span>
+                <div class="d-flex align-items-center">
+                    <span class="text-muted me-3" id="snapshotInfo">加载中...</span>
+                    <button class="btn btn-sm btn-gradient" onclick="refreshData()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>刷新
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" id="hotTableContainer">
+                <div class="loading-spinner">
+                    <div class="spinner-border" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-box-seam me-2"></i>交易信号分析
+            </div>
+            <div class="card-body" id="signalContainer">
+                <div class="loading-spinner">
+                    <div class="spinner-border" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-graph-up me-2"></i>趋势分析
+            </div>
+            <div class="card-body" id="trendContainer">
+                <div class="loading-spinner">
+                    <div class="spinner-border" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-emoji-smile me-2"></i>市场情绪
+            </div>
+            <div class="card-body" id="sentimentContainer">
+                <div class="loading-spinner">
+                    <div class="spinner-border" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-tags me-2"></i>关键词演变
+            </div>
+            <div class="card-body" id="keywordContainer">
+                <div class="loading-spinner">
+                    <div class="spinner-border" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentData = null;
+
+async function loadData() {
+    try {
+        currentData = await apiCall('/api/latest');
+        renderAll();
+    } catch (error) {
+        console.error('加载数据失败:', error);
+        showError('加载数据失败，请稍后重试');
+    }
+}
+
+function refreshData() {
+    document.getElementById('hotTableContainer').innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    document.getElementById('signalContainer').innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    document.getElementById('trendContainer').innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    document.getElementById('sentimentContainer').innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    document.getElementById('keywordContainer').innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    loadData();
+}
+
+function renderAll() {
+    renderHotTable();
+    renderSignals();
+    renderTrend();
+    renderSentiment();
+    renderKeywords();
+}
+
+function renderHotTable() {
+    const container = document.getElementById('hotTableContainer');
+    const infoEl = document.getElementById('snapshotInfo');
+    
+    if (!currentData || !currentData.snapshot || !currentData.snapshot.hot_list) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i><p>暂无热搜数据</p></div>';
+        infoEl.textContent = '暂无数据';
+        return;
+    }
+    
+    const snapshot = currentData.snapshot;
+    const hotList = snapshot.hot_list;
+    
+    infoEl.innerHTML = `快照时间: <strong>${formatDateTime(snapshot.timestamp)}</strong> (共 ${hotList.length} 条)`;
+    
+    let html = '<div class="table-responsive"><table class="table table-hover">';
+    html += '<thead><tr><th style="width: 80px;">排名</th><th>热搜标题</th><th style="width: 120px;">热度</th><th style="width: 80px;">标记</th></tr></thead><tbody>';
+    
+    hotList.forEach(item => {
+        const badgeClass = item.rank <= 3 ? 'rank-top-3' : 'rank-other';
+        const marketTag = item.is_market ? '<span class="market-tag">置顶</span>' : '';
+        
+        html += `<tr>
+            <td><span class="rank-badge ${badgeClass}">${item.rank}</span></td>
+            <td>
+                ${item.url ? `<a href="${item.url}" target="_blank" class="text-decoration-none">${item.title}</a>` : item.title}
+            </td>
+            <td><span class="hot-value">${item.hot || '-'}</span></td>
+            <td>${marketTag}</td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function renderSignals() {
+    const container = document.getElementById('signalContainer');
+    
+    if (!currentData || !currentData.analysis) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-robot"></i><p>暂无AI分析结果</p></div>';
+        return;
+    }
+    
+    const analysis = currentData.analysis;
+    const stock = analysis.stock_analysis || {};
+    const opportunities = stock.stock_opportunities || [];
+    
+    if (opportunities.length === 0) {
+        container.innerHTML = `<div class="p-3">
+            <h6 class="text-primary mb-2"><i class="bi bi-chat-left-text me-1"></i>分析总结</h6>
+            <p class="text-muted mb-0">${stock.summary || '暂无交易信号'}</p>
+        </div>`;
+        return;
+    }
+    
+    let html = '';
+    opportunities.forEach((opp, idx) => {
+        const signalClass = opp.signal_type === '买入信号' ? 'buy' : 
+                           opp.signal_type === '卖出信号' ? 'sell' : 'watch';
+        const badgeClass = opp.signal_type === '买入信号' ? 'badge-buy' : 
+                           opp.signal_type === '卖出信号' ? 'badge-sell' : 'badge-watch';
+        const impactClass = opp.impact_level === '高' ? 'impact-high' : 
+                            opp.impact_level === '中' ? 'impact-medium' : 'impact-low';
+        
+        html += `
+            <div class="signal-card ${signalClass} mb-4">
+                <div class="signal-header">
+                    <div>
+                        ${opp.impact_level ? `<span class="signal-badge ${impactClass}">影响：${opp.impact_level}</span>` : ''}
+                        <span class="signal-event">${opp.event}</span>
+                    </div>
+                    <span class="signal-badge ${badgeClass}">${opp.signal_type}</span>
+                </div>
+                
+                <div class="signal-content">
+                    <div class="signal-box">
+                        <h4><i class="bi bi-building me-1"></i>关联行业</h4>
+                        ${opp.related_industries && opp.related_industries.length > 0 ? `
+                            <div class="hot-industries mb-3">
+                                ${opp.related_industries.map(ind => `<span class="industry-tag">${ind}</span>`).join('')}
+                            </div>
+                        ` : '<p class="text-muted small">暂无关联行业</p>'}
+                        
+                        ${opp.analysis ? `
+                            <div>
+                                <h4><i class="bi bi-file-text me-1"></i>详细分析</h4>
+                                <p class="small text-muted mb-0">${opp.analysis}</p>
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    <div class="signal-box">
+                        <h4><i class="bi bi-graph-up me-1"></i>关联股票</h4>
+                        ${opp.related_stocks && opp.related_stocks.length > 0 ? `
+                            ${opp.related_stocks.map(stock => `
+                                <div class="stock-item">
+                                    <div class="stock-header">
+                                        <span class="stock-name">${stock.stock_name} <span class="stock-code">(${stock.stock_code})</span></span>
+                                        <span class="stock-confidence">信心: ${stock.confidence || '-'}%</span>
+                                    </div>
+                                    ${stock.industry ? `<p class="stock-industry">行业: ${stock.industry}</p>` : ''}
+                                    ${stock.reasoning ? `<p class="stock-reasoning">${stock.reasoning}</p>` : ''}
+                                </div>
+                            `).join('')}
+                        ` : '<p class="text-muted small">暂无关联股票</p>'}
+                    </div>
+                </div>
+                
+                ${opp.risk_warning ? `
+                    <div class="risk-warning">
+                        <h4><i class="bi bi-exclamation-triangle me-1"></i>风险提示</h4>
+                        <p class="mb-0">${opp.risk_warning}</p>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+    
+    if (stock.summary) {
+        html += `
+            <div class="summary-box">
+                <h3><i class="bi bi-journal-text me-2"></i>整体分析总结</h3>
+                <p class="mb-0">${stock.summary}</p>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+function renderTrend() {
+    const container = document.getElementById('trendContainer');
+    
+    if (!currentData || !currentData.analysis) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-graph-up"></i><p>暂无趋势分析</p></div>';
+        return;
+    }
+    
+    const trend = currentData.analysis.trend_analysis || {};
+    
+    let html = '';
+    
+    if (trend.new_hot_topics && trend.new_hot_topics.length > 0) {
+        html += `<h6 class="text-success mb-2"><i class="bi bi-star me-1"></i>新热门话题</h6>`;
+        trend.new_hot_topics.forEach(topic => {
+            html += `
+                <div class="trend-item trend-new">
+                    <div class="trend-title">${topic.title}</div>
+                    ${topic.reason ? `<div class="trend-desc">${topic.reason}</div>` : ''}
+                    ${topic.rank_change ? `<div class="trend-desc text-success"><i class="bi bi-arrow-up me-1"></i>${topic.rank_change}</div>` : ''}
+                </div>
+            `;
+        });
+    }
+    
+    if (trend.rising_topics && trend.rising_topics.length > 0) {
+        html += `<h6 class="text-primary mb-2 mt-4"><i class="bi bi-arrow-up-right me-1"></i>热度上升话题</h6>`;
+        trend.rising_topics.forEach(topic => {
+            html += `
+                <div class="trend-item trend-rising">
+                    <div class="trend-title">${topic.title}</div>
+                    ${topic.trend ? `<div class="trend-desc">${topic.trend}</div>` : ''}
+                    ${topic.potential_impact ? `<div class="trend-desc text-primary">潜在影响: ${topic.potential_impact}</div>` : ''}
+                </div>
+            `;
+        });
+    }
+    
+    if (trend.declining_topics && trend.declining_topics.length > 0) {
+        html += `<h6 class="text-danger mb-2 mt-4"><i class="bi bi-arrow-down-right me-1"></i>热度下降话题</h6>`;
+        trend.declining_topics.forEach(topic => {
+            html += `
+                <div class="trend-item trend-declining">
+                    <div class="trend-title">${topic.title}</div>
+                    ${topic.trend ? `<div class="trend-desc">${topic.trend}</div>` : ''}
+                    ${topic.reason ? `<div class="trend-desc text-danger">下降原因: ${topic.reason}</div>` : ''}
+                </div>
+            `;
+        });
+    }
+    
+    if (trend.overall_trend_summary) {
+        html += `
+            <div class="summary-box mt-4">
+                <h3><i class="bi bi-bar-chart-line me-2"></i>整体趋势总结</h3>
+                <p class="mb-0">${trend.overall_trend_summary}</p>
+            </div>
+        `;
+    }
+    
+    if (!html) {
+        html = '<div class="empty-state"><i class="bi bi-graph-up"></i><p>暂无趋势分析数据</p></div>';
+    }
+    
+    container.innerHTML = html;
+}
+
+function renderSentiment() {
+    const container = document.getElementById('sentimentContainer');
+    
+    if (!currentData || !currentData.analysis) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-emoji-smile"></i><p>暂无市场情绪数据</p></div>';
+        return;
+    }
+    
+    const stock = currentData.analysis.stock_analysis || {};
+    const sentiment = stock.market_sentiment;
+    
+    if (!sentiment) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-emoji-smile"></i><p>暂无市场情绪数据</p></div>';
+        return;
+    }
+    
+    const sentimentClass = sentiment.overall_sentiment === '乐观' ? 'optimistic' : 
+                          sentiment.overall_sentiment === '悲观' ? 'pessimistic' : 'cautious';
+    const sentimentIcon = sentiment.overall_sentiment === '乐观' ? 'emoji-smile' : 
+                         sentiment.overall_sentiment === '悲观' ? 'emoji-frown' : 'emoji-neutral';
+    
+    let html = `
+        <div class="sentiment-card">
+            <div class="sentiment-box">
+                <h4><i class="bi bi-heart me-1"></i>整体情绪</h4>
+                <div class="sentiment-value ${sentimentClass}">
+                    <i class="bi bi-${sentimentIcon} me-2"></i>${sentiment.overall_sentiment || '未知'}
+                </div>
+                ${sentiment.sentiment_reason ? `<p class="text-muted small mb-0">${sentiment.sentiment_reason}</p>` : ''}
+            </div>
+            <div class="sentiment-box">
+                <h4><i class="bi bi-fire me-1"></i>热门行业</h4>
+                ${sentiment.hot_industries && sentiment.hot_industries.length > 0 ? `
+                    <div class="hot-industries">
+                        ${sentiment.hot_industries.map(ind => `<span class="industry-tag">${ind}</span>`).join('')}
+                    </div>
+                ` : '<p class="text-muted small">暂无热门行业</p>'}
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+function renderKeywords() {
+    const container = document.getElementById('keywordContainer');
+    
+    if (!currentData || !currentData.analysis) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-tags"></i><p>暂无关键词数据</p></div>';
+        return;
+    }
+    
+    const trend = currentData.analysis.trend_analysis || {};
+    const keywords = trend.keyword_evolution || {};
+    
+    let html = '<div class="keyword-boxes">';
+    
+    if (keywords.emerging_keywords && keywords.emerging_keywords.length > 0) {
+        html += `
+            <div class="keyword-box">
+                <h4><i class="bi bi-stars text-success me-2"></i>新出现关键词</h4>
+                <div class="keyword-tags">
+                    ${keywords.emerging_keywords.map(kw => `<span class="keyword-tag">${kw}</span>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    if (keywords.stable_keywords && keywords.stable_keywords.length > 0) {
+        html += `
+            <div class="keyword-box">
+                <h4><i class="bi bi-lightning text-primary me-2"></i>持续热门关键词</h4>
+                <div class="keyword-tags">
+                    ${keywords.stable_keywords.map(kw => `<span class="keyword-tag">${kw}</span>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    if (keywords.fading_keywords && keywords.fading_keywords.length > 0) {
+        html += `
+            <div class="keyword-box">
+                <h4><i class="bi bi-moon text-secondary me-2"></i>逐渐消失关键词</h4>
+                <div class="keyword-tags">
+                    ${keywords.fading_keywords.map(kw => `<span class="keyword-tag">${kw}</span>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    html += '</div>';
+    
+    if (html === '<div class="keyword-boxes"></div>') {
+        html = '<div class="empty-state"><i class="bi bi-tags"></i><p>暂无关键词演变数据</p></div>';
+    }
+    
+    container.innerHTML = html;
+}
+
+function showError(message) {
+    const containers = ['hotTableContainer', 'signalContainer', 'trendContainer', 'sentimentContainer', 'keywordContainer'];
+    containers.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.innerHTML.includes('spinner')) {
+            el.innerHTML = `<div class="text-center text-danger py-4">${message}</div>`;
+        }
+    });
+}
+
+loadData();
+</script>
+{% endblock %}
