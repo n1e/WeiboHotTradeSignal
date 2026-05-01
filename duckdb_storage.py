@@ -35,6 +35,8 @@ class DuckDBStorage:
         with duckdb.connect(self.db_path) as conn:
             conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_snapshot_id START 1")
             conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_item_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_daily_topic_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_weekly_topic_id START 1")
             
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS hot_search_snapshots (
@@ -61,12 +63,52 @@ class DuckDBStorage:
                 )
             """)
             
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_hot_topics (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_daily_topic_id'),
+                    topic_date DATE NOT NULL,
+                    topic_rank INTEGER NOT NULL,
+                    title VARCHAR NOT NULL,
+                    first_seen_time TIMESTAMP,
+                    last_seen_time TIMESTAMP,
+                    appearance_count INTEGER NOT NULL DEFAULT 0,
+                    best_rank INTEGER,
+                    avg_hot_value DOUBLE,
+                    hot_value_max DOUBLE,
+                    hot_value_min DOUBLE,
+                    analysis_summary VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(topic_date, topic_rank)
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS weekly_hot_topics (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_weekly_topic_id'),
+                    week_start_date DATE NOT NULL,
+                    week_end_date DATE NOT NULL,
+                    topic_rank INTEGER NOT NULL,
+                    title VARCHAR NOT NULL,
+                    appearance_days INTEGER NOT NULL DEFAULT 0,
+                    best_rank INTEGER,
+                    trend_summary VARCHAR,
+                    analysis_summary VARCHAR,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(week_start_date, week_end_date, topic_rank)
+                )
+            """)
+            
             conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_time ON hot_search_snapshots(snapshot_time)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_snapshot_id ON hot_search_items(snapshot_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_time ON hot_search_items(snapshot_time)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_title ON hot_search_items(title)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_rank ON hot_search_items(rank)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_items_time_title ON hot_search_items(snapshot_time, title)")
+            
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_topics_date ON daily_hot_topics(topic_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_topics_title ON daily_hot_topics(title)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_weekly_topics_week ON weekly_hot_topics(week_start_date, week_end_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_weekly_topics_title ON weekly_hot_topics(title)")
             
             conn.commit()
     
@@ -515,6 +557,389 @@ class DuckDBStorage:
         
         print(f"导出完成: 导出 {export_count} 个快照到 {output_dir}")
         return export_count
+    
+    def get_representative_snapshots_by_date(self, target_date: datetime.date, max_snapshots: int = 5) -> List[Dict]:
+        """
+        获取指定日期的代表性快照数据（不超过指定数量）
+        
+        Args:
+            target_date: 目标日期
+            max_snapshots: 最大快照数量
+            
+        Returns:
+            代表性快照列表，包含关键信息
+        """
+        start_time = datetime.combine(target_date, datetime.min.time())
+        end_time = datetime.combine(target_date, datetime.max.time())
+        
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                snapshots = conn.execute("""
+                    SELECT id, snapshot_time, total_count
+                    FROM hot_search_snapshots
+                    WHERE snapshot_time >= ? AND snapshot_time <= ?
+                    ORDER BY snapshot_time
+                """, [start_time, end_time]).fetchall()
+                
+                if not snapshots:
+                    print(f"日期 {target_date} 没有快照数据")
+                    return []
+                
+                result = []
+                
+                if len(snapshots) <= max_snapshots:
+                    selected_indices = list(range(len(snapshots)))
+                else:
+                    selected_indices = [0]
+                    step = (len(snapshots) - 2) // (max_snapshots - 2) if max_snapshots > 2 else 1
+                    for i in range(1, max_snapshots - 1):
+                        selected_indices.append(i * step)
+                    selected_indices.append(len(snapshots) - 1)
+                
+                for idx in selected_indices:
+                    if idx < len(snapshots):
+                        snapshot_id, snapshot_time, total_count = snapshots[idx]
+                        
+                        items = conn.execute("""
+                            SELECT rank, title, hot, hot_value
+                            FROM hot_search_items
+                            WHERE snapshot_id = ?
+                            ORDER BY rank
+                            LIMIT 30
+                        """, [snapshot_id]).fetchall()
+                        
+                        hot_list = []
+                        for item in items:
+                            rank, title, hot, hot_value = item
+                            hot_list.append({
+                                'rank': rank,
+                                'title': title,
+                                'hot': hot,
+                                'hot_value': hot_value
+                            })
+                        
+                        result.append({
+                            'snapshot_id': snapshot_id,
+                            'snapshot_time': snapshot_time.isoformat(),
+                            'total_count': total_count,
+                            'hot_list': hot_list
+                        })
+                
+                print(f"选择了 {len(result)} 个代表性快照（共 {len(snapshots)} 个快照）")
+                return result
+                
+        except Exception as e:
+            print(f"获取代表性快照失败: {e}")
+            return []
+    
+    def get_topic_appearances_by_date(self, target_date: datetime.date) -> Dict[str, Dict]:
+        """
+        获取指定日期所有话题的出现统计
+        
+        Args:
+            target_date: 目标日期
+            
+        Returns:
+            按标题分组的话题统计字典
+        """
+        start_time = datetime.combine(target_date, datetime.min.time())
+        end_time = datetime.combine(target_date, datetime.max.time())
+        
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT 
+                        title,
+                        MIN(snapshot_time) as first_seen,
+                        MAX(snapshot_time) as last_seen,
+                        COUNT(*) as appearance_count,
+                        MIN(rank) as best_rank,
+                        AVG(hot_value) as avg_hot_value,
+                        MAX(hot_value) as hot_value_max,
+                        MIN(hot_value) as hot_value_min
+                    FROM hot_search_items
+                    WHERE snapshot_time >= ? AND snapshot_time <= ?
+                    GROUP BY title
+                    HAVING COUNT(*) > 0
+                    ORDER BY appearance_count DESC, best_rank ASC
+                """, [start_time, end_time]).fetchall()
+                
+                topic_stats = {}
+                for row in results:
+                    title, first_seen, last_seen, appearance_count, best_rank, avg_hot_value, hot_value_max, hot_value_min = row
+                    topic_stats[title] = {
+                        'title': title,
+                        'first_seen_time': first_seen,
+                        'last_seen_time': last_seen,
+                        'appearance_count': appearance_count,
+                        'best_rank': best_rank,
+                        'avg_hot_value': avg_hot_value,
+                        'hot_value_max': hot_value_max,
+                        'hot_value_min': hot_value_min
+                    }
+                
+                return topic_stats
+                
+        except Exception as e:
+            print(f"获取话题出现统计失败: {e}")
+            return {}
+    
+    def save_daily_hot_topics(self, target_date: datetime.date, topics: List[Dict]) -> bool:
+        """
+        保存每日热门话题到数据库
+        
+        Args:
+            target_date: 目标日期
+            topics: 热门话题列表，每个话题包含：
+                - topic_rank: 排名
+                - title: 标题
+                - first_seen_time: 首次出现时间
+                - last_seen_time: 最后出现时间
+                - appearance_count: 出现次数
+                - best_rank: 最佳排名
+                - avg_hot_value: 平均热度
+                - hot_value_max: 最大热度
+                - hot_value_min: 最小热度
+                - analysis_summary: 分析摘要（可选）
+                
+        Returns:
+            是否保存成功
+        """
+        if not topics:
+            print("没有热门话题数据可保存")
+            return False
+        
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("""
+                    DELETE FROM daily_hot_topics WHERE topic_date = ?
+                """, [target_date])
+                
+                for topic in topics:
+                    conn.execute("""
+                        INSERT INTO daily_hot_topics 
+                        (topic_date, topic_rank, title, first_seen_time, last_seen_time, 
+                         appearance_count, best_rank, avg_hot_value, hot_value_max, hot_value_min, 
+                         analysis_summary, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, [
+                        target_date,
+                        topic.get('topic_rank', 0),
+                        topic.get('title', ''),
+                        topic.get('first_seen_time'),
+                        topic.get('last_seen_time'),
+                        topic.get('appearance_count', 0),
+                        topic.get('best_rank'),
+                        topic.get('avg_hot_value'),
+                        topic.get('hot_value_max'),
+                        topic.get('hot_value_min'),
+                        topic.get('analysis_summary', '')
+                    ])
+                
+                conn.commit()
+                print(f"已保存 {len(topics)} 条每日热门话题到数据库 (日期: {target_date})")
+                return True
+                
+        except Exception as e:
+            print(f"保存每日热门话题失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def get_daily_hot_topics(self, target_date: datetime.date) -> List[Dict]:
+        """
+        获取指定日期的热门话题
+        
+        Args:
+            target_date: 目标日期
+            
+        Returns:
+            热门话题列表
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT 
+                        id, topic_date, topic_rank, title, first_seen_time, last_seen_time,
+                        appearance_count, best_rank, avg_hot_value, hot_value_max, hot_value_min,
+                        analysis_summary, created_at
+                    FROM daily_hot_topics
+                    WHERE topic_date = ?
+                    ORDER BY topic_rank
+                """, [target_date]).fetchall()
+                
+                topics = []
+                for row in results:
+                    topics.append({
+                        'id': row[0],
+                        'topic_date': row[1],
+                        'topic_rank': row[2],
+                        'title': row[3],
+                        'first_seen_time': row[4].isoformat() if row[4] else None,
+                        'last_seen_time': row[5].isoformat() if row[5] else None,
+                        'appearance_count': row[6],
+                        'best_rank': row[7],
+                        'avg_hot_value': row[8],
+                        'hot_value_max': row[9],
+                        'hot_value_min': row[10],
+                        'analysis_summary': row[11],
+                        'created_at': row[12].isoformat() if row[12] else None
+                    })
+                
+                return topics
+                
+        except Exception as e:
+            print(f"获取每日热门话题失败: {e}")
+            return []
+    
+    def get_daily_hot_topics_by_week(self, week_start: datetime.date, week_end: datetime.date) -> Dict[datetime.date, List[Dict]]:
+        """
+        获取指定周内每天的热门话题
+        
+        Args:
+            week_start: 周开始日期
+            week_end: 周结束日期
+            
+        Returns:
+            按日期分组的热门话题字典
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT 
+                        id, topic_date, topic_rank, title, first_seen_time, last_seen_time,
+                        appearance_count, best_rank, avg_hot_value, hot_value_max, hot_value_min,
+                        analysis_summary, created_at
+                    FROM daily_hot_topics
+                    WHERE topic_date >= ? AND topic_date <= ?
+                    ORDER BY topic_date, topic_rank
+                """, [week_start, week_end]).fetchall()
+                
+                daily_topics = {}
+                for row in results:
+                    topic_date = row[1]
+                    if topic_date not in daily_topics:
+                        daily_topics[topic_date] = []
+                    
+                    daily_topics[topic_date].append({
+                        'id': row[0],
+                        'topic_date': row[1],
+                        'topic_rank': row[2],
+                        'title': row[3],
+                        'first_seen_time': row[4].isoformat() if row[4] else None,
+                        'last_seen_time': row[5].isoformat() if row[5] else None,
+                        'appearance_count': row[6],
+                        'best_rank': row[7],
+                        'avg_hot_value': row[8],
+                        'hot_value_max': row[9],
+                        'hot_value_min': row[10],
+                        'analysis_summary': row[11],
+                        'created_at': row[12].isoformat() if row[12] else None
+                    })
+                
+                return daily_topics
+                
+        except Exception as e:
+            print(f"获取周内每日热门话题失败: {e}")
+            return {}
+    
+    def save_weekly_hot_topics(self, week_start: datetime.date, week_end: datetime.date, topics: List[Dict]) -> bool:
+        """
+        保存每周热门话题到数据库
+        
+        Args:
+            week_start: 周开始日期
+            week_end: 周结束日期
+            topics: 热门话题列表，每个话题包含：
+                - topic_rank: 排名
+                - title: 标题
+                - appearance_days: 出现天数
+                - best_rank: 最佳排名
+                - trend_summary: 趋势摘要
+                - analysis_summary: 分析摘要
+                
+        Returns:
+            是否保存成功
+        """
+        if not topics:
+            print("没有每周热门话题数据可保存")
+            return False
+        
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("""
+                    DELETE FROM weekly_hot_topics WHERE week_start_date = ? AND week_end_date = ?
+                """, [week_start, week_end])
+                
+                for topic in topics:
+                    conn.execute("""
+                        INSERT INTO weekly_hot_topics 
+                        (week_start_date, week_end_date, topic_rank, title, appearance_days, 
+                         best_rank, trend_summary, analysis_summary, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, [
+                        week_start,
+                        week_end,
+                        topic.get('topic_rank', 0),
+                        topic.get('title', ''),
+                        topic.get('appearance_days', 0),
+                        topic.get('best_rank'),
+                        topic.get('trend_summary', ''),
+                        topic.get('analysis_summary', '')
+                    ])
+                
+                conn.commit()
+                print(f"已保存 {len(topics)} 条每周热门话题到数据库 (周: {week_start} ~ {week_end})")
+                return True
+                
+        except Exception as e:
+            print(f"保存每周热门话题失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def get_weekly_hot_topics(self, week_start: datetime.date, week_end: datetime.date) -> List[Dict]:
+        """
+        获取指定周的热门话题
+        
+        Args:
+            week_start: 周开始日期
+            week_end: 周结束日期
+            
+        Returns:
+            热门话题列表
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT 
+                        id, week_start_date, week_end_date, topic_rank, title, 
+                        appearance_days, best_rank, trend_summary, analysis_summary, created_at
+                    FROM weekly_hot_topics
+                    WHERE week_start_date = ? AND week_end_date = ?
+                    ORDER BY topic_rank
+                """, [week_start, week_end]).fetchall()
+                
+                topics = []
+                for row in results:
+                    topics.append({
+                        'id': row[0],
+                        'week_start_date': row[1],
+                        'week_end_date': row[2],
+                        'topic_rank': row[3],
+                        'title': row[4],
+                        'appearance_days': row[5],
+                        'best_rank': row[6],
+                        'trend_summary': row[7],
+                        'analysis_summary': row[8],
+                        'created_at': row[9].isoformat() if row[9] else None
+                    })
+                
+                return topics
+                
+        except Exception as e:
+            print(f"获取每周热门话题失败: {e}")
+            return []
 
 
 def main():
