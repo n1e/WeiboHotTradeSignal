@@ -763,6 +763,12 @@ if __name__ == '__main__':
     print(f"  - 日内变化: http://localhost:{port}/intraday")
     print(f"  - 总结资讯: http://localhost:{port}/summary")
     print(f"  - 任务管理: http://localhost:{port}/tasks")
+    
+    print(f"\n已注册的API路由:")
+    for rule in sorted(app.url_map.iter_rules(), key=lambda r: str(r)):
+        if '/api/' in str(rule):
+            print(f"  - {str(rule)}")
+    
     print("\n按 Ctrl+C 停止服务器")
     print("=" * 60)
     

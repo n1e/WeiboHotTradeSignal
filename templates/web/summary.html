@@ -89,20 +89,6 @@
         transform: rotate(180deg);
     }
     
-    .topic-mini-card {
-        background: #f8f9fa;
-        border-radius: 6px;
-        padding: 10px 12px;
-        margin-bottom: 8px;
-        border-left: 3px solid #667eea;
-    }
-    
-    .topic-mini-card .rank-badge {
-        width: 24px;
-        height: 24px;
-        font-size: 0.75rem;
-    }
-    
     .empty-summary {
         border: 2px dashed #dee2e6;
         border-radius: 8px;
@@ -117,6 +103,45 @@
         border-radius: 20px;
         font-size: 0.85rem;
         margin-left: 8px;
+    }
+    
+    .mode-radio {
+        display: inline-flex;
+        align-items: center;
+        margin-right: 15px;
+        cursor: pointer;
+    }
+    
+    .mode-radio input {
+        margin-right: 5px;
+    }
+    
+    .mode-section {
+        padding: 10px 0;
+        border-bottom: 1px solid #eee;
+        margin-bottom: 15px;
+    }
+    
+    .single-day-view {
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin-bottom: 15px;
+    }
+    
+    .single-day-view .summary-header {
+        margin-bottom: 0;
+    }
+    
+    .single-day-view .summary-content {
+        background: white;
+        border-radius: 0 0 8px 8px;
+        margin-top: -1px;
+        display: block;
+    }
+    
+    .hidden-section {
+        display: none;
     }
 </style>
 {% endblock %}
@@ -144,90 +169,179 @@
     <div class="col-12">
         <ul class="nav nav-tabs" id="summaryTabs">
             <li class="nav-item">
-                <a class="nav-link active" data-bs-toggle="tab" href="#dailyListTab">
-                    <i class="bi bi-calendar-day me-1"></i>每日总结（多日对比）
+                <a class="nav-link active" data-bs-toggle="tab" href="#dailyTab">
+                    <i class="bi bi-calendar-day me-1"></i>每日总结
                 </a>
             </li>
             <li class="nav-item">
-                <a class="nav-link" data-bs-toggle="tab" href="#weeklyListTab">
-                    <i class="bi bi-calendar-week me-1"></i>每周总结（多周对比）
+                <a class="nav-link" data-bs-toggle="tab" href="#weeklyTab">
+                    <i class="bi bi-calendar-week me-1"></i>每周总结
                 </a>
             </li>
         </ul>
         
         <div class="tab-content" id="tabContent">
-            <div class="tab-pane fade show active" id="dailyListTab">
+            <div class="tab-pane fade show active" id="dailyTab">
                 <div class="card">
                     <div class="card-body">
-                        <div class="row mb-4 align-items-center">
-                            <div class="col-md-8">
-                                <label class="form-label d-block"><i class="bi bi-filter me-1"></i>时间范围选择</label>
-                                <div class="d-flex flex-wrap align-items-center gap-3">
-                                    <div class="quick-selector">
-                                        <button class="quick-btn active" onclick="setQuickDays(3, this)">近3天</button>
-                                        <button class="quick-btn" onclick="setQuickDays(7, this)">近7天</button>
-                                        <button class="quick-btn" onclick="setQuickDays(14, this)">近14天</button>
-                                        <button class="quick-btn" onclick="setQuickDays(30, this)">近30天</button>
-                                    </div>
-                                    <span class="text-muted">或自定义：</span>
-                                    <div class="date-range-selector">
-                                        <input type="date" id="dailyStartDate" class="form-control form-control-sm" style="width: 140px;">
-                                        <span class="text-muted">至</span>
-                                        <input type="date" id="dailyEndDate" class="form-control form-control-sm" style="width: 140px;">
-                                    </div>
-                                    <button class="btn btn-sm btn-gradient" onclick="loadDailySummaries()">
-                                        <i class="bi bi-search me-1"></i>查询
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="col-md-4 text-end">
-                                <small class="text-muted">
-                                    <i class="bi bi-info-circle me-1"></i>
-                                    点击日期行可展开查看详细内容
-                                </small>
+                        <div class="mode-section">
+                            <label class="form-label"><i class="bi bi-funnel me-1"></i>查询模式</label>
+                            <div class="d-flex align-items-center">
+                                <label class="mode-radio">
+                                    <input type="radio" name="dailyMode" value="single" onclick="switchDailyMode('single')" checked>
+                                    <span>单日查询</span>
+                                </label>
+                                <label class="mode-radio">
+                                    <input type="radio" name="dailyMode" value="multi" onclick="switchDailyMode('multi')">
+                                    <span>多日对比</span>
+                                </label>
                             </div>
                         </div>
                         
-                        <div id="dailyListContainer">
-                            <div class="loading-spinner">
-                                <div class="spinner-border" role="status"></div>
+                        <div id="dailySingleSection">
+                            <div class="row mb-4 align-items-center">
+                                <div class="col-md-6">
+                                    <label class="form-label"><i class="bi bi-calendar me-1"></i>选择日期</label>
+                                    <div class="d-flex align-items-center gap-3">
+                                        <input type="date" id="dailySingleDate" class="form-control form-control-sm" style="width: 140px;">
+                                        <button class="btn btn-sm btn-gradient" onclick="loadSingleDailySummary()">
+                                            <i class="bi bi-search me-1"></i>查询
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 text-end">
+                                    <div class="quick-selector">
+                                        <button class="quick-btn active" onclick="selectSingleDay(-1, this)">昨天</button>
+                                        <button class="quick-btn" onclick="selectSingleDay(-2, this)">前天</button>
+                                        <button class="quick-btn" onclick="selectSingleDay(-3, this)">3天前</button>
+                                        <button class="quick-btn" onclick="selectSingleDay(-7, this)">一周前</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div id="dailySingleContainer">
+                                <div class="empty-summary">
+                                    <i class="bi bi-calendar-day" style="font-size: 3rem; opacity: 0.3;"></i>
+                                    <p class="mt-3 mb-2">请选择日期查询每日总结</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="dailyMultiSection" class="hidden-section">
+                            <div class="row mb-4 align-items-center">
+                                <div class="col-md-8">
+                                    <label class="form-label"><i class="bi bi-filter me-1"></i>时间范围选择</label>
+                                    <div class="d-flex flex-wrap align-items-center gap-3">
+                                        <div class="quick-selector">
+                                            <button class="quick-btn active" onclick="setQuickDays(3, this)">近3天</button>
+                                            <button class="quick-btn" onclick="setQuickDays(7, this)">近7天</button>
+                                            <button class="quick-btn" onclick="setQuickDays(14, this)">近14天</button>
+                                            <button class="quick-btn" onclick="setQuickDays(30, this)">近30天</button>
+                                        </div>
+                                        <span class="text-muted">或自定义：</span>
+                                        <div class="date-range-selector">
+                                            <input type="date" id="dailyStartDate" class="form-control form-control-sm" style="width: 140px;">
+                                            <span class="text-muted">至</span>
+                                            <input type="date" id="dailyEndDate" class="form-control form-control-sm" style="width: 140px;">
+                                        </div>
+                                        <button class="btn btn-sm btn-gradient" onclick="loadDailySummaries()">
+                                            <i class="bi bi-search me-1"></i>查询
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <small class="text-muted">
+                                        <i class="bi bi-info-circle me-1"></i>
+                                        点击日期行可展开查看详细内容
+                                    </small>
+                                </div>
+                            </div>
+                            
+                            <div id="dailyListContainer">
+                                <div class="loading-spinner">
+                                    <div class="spinner-border" role="status"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
             
-            <div class="tab-pane fade" id="weeklyListTab">
+            <div class="tab-pane fade" id="weeklyTab">
                 <div class="card">
                     <div class="card-body">
-                        <div class="row mb-4 align-items-center">
-                            <div class="col-md-8">
-                                <label class="form-label d-block"><i class="bi bi-filter me-1"></i>周数选择</label>
-                                <div class="d-flex flex-wrap align-items-center gap-3">
-                                    <div class="quick-selector">
-                                        <button class="quick-btn active" onclick="setQuickWeeks(2, this)">近2周</button>
-                                        <button class="quick-btn" onclick="setQuickWeeks(4, this)">近4周</button>
-                                        <button class="quick-btn" onclick="setQuickWeeks(8, this)">近8周</button>
-                                        <button class="quick-btn" onclick="setQuickWeeks(12, this)">近12周</button>
-                                    </div>
-                                    <span class="text-muted">或输入周数：</span>
-                                    <input type="number" id="weekCount" class="form-control form-control-sm" style="width: 80px;" value="2" min="1" max="52">
-                                    <button class="btn btn-sm btn-gradient" onclick="loadWeeklySummaries()">
-                                        <i class="bi bi-search me-1"></i>查询
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="col-md-4 text-end">
-                                <small class="text-muted">
-                                    <i class="bi bi-info-circle me-1"></i>
-                                    点击周行可展开查看详细内容
-                                </small>
+                        <div class="mode-section">
+                            <label class="form-label"><i class="bi bi-funnel me-1"></i>查询模式</label>
+                            <div class="d-flex align-items-center">
+                                <label class="mode-radio">
+                                    <input type="radio" name="weeklyMode" value="single" onclick="switchWeeklyMode('single')" checked>
+                                    <span>单周查询</span>
+                                </label>
+                                <label class="mode-radio">
+                                    <input type="radio" name="weeklyMode" value="multi" onclick="switchWeeklyMode('multi')">
+                                    <span>多周对比</span>
+                                </label>
                             </div>
                         </div>
                         
-                        <div id="weeklyListContainer">
-                            <div class="loading-spinner">
-                                <div class="spinner-border" role="status"></div>
+                        <div id="weeklySingleSection">
+                            <div class="row mb-4 align-items-center">
+                                <div class="col-md-8">
+                                    <label class="form-label"><i class="bi bi-calendar3 me-1"></i>选择周（选择周的结束日期，通常为周日）</label>
+                                    <div class="d-flex align-items-center gap-3">
+                                        <input type="date" id="weekSingleEndDate" class="form-control form-control-sm" style="width: 140px;">
+                                        <button class="btn btn-sm btn-gradient" onclick="loadSingleWeeklySummary()">
+                                            <i class="bi bi-search me-1"></i>查询
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <div class="quick-selector">
+                                        <button class="quick-btn active" onclick="selectSingleWeek(-1, this)">上周</button>
+                                        <button class="quick-btn" onclick="selectSingleWeek(-2, this)">上上周</button>
+                                        <button class="quick-btn" onclick="selectSingleWeek(-4, this)">4周前</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div id="weeklySingleContainer">
+                                <div class="empty-summary">
+                                    <i class="bi bi-calendar-week" style="font-size: 3rem; opacity: 0.3;"></i>
+                                    <p class="mt-3 mb-2">请选择周查询每周总结</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="weeklyMultiSection" class="hidden-section">
+                            <div class="row mb-4 align-items-center">
+                                <div class="col-md-8">
+                                    <label class="form-label"><i class="bi bi-filter me-1"></i>周数选择</label>
+                                    <div class="d-flex flex-wrap align-items-center gap-3">
+                                        <div class="quick-selector">
+                                            <button class="quick-btn active" onclick="setQuickWeeks(2, this)">近2周</button>
+                                            <button class="quick-btn" onclick="setQuickWeeks(4, this)">近4周</button>
+                                            <button class="quick-btn" onclick="setQuickWeeks(8, this)">近8周</button>
+                                            <button class="quick-btn" onclick="setQuickWeeks(12, this)">近12周</button>
+                                        </div>
+                                        <span class="text-muted">或输入周数：</span>
+                                        <input type="number" id="weekCount" class="form-control form-control-sm" style="width: 80px;" value="2" min="1" max="52">
+                                        <button class="btn btn-sm btn-gradient" onclick="loadWeeklySummaries()">
+                                            <i class="bi bi-search me-1"></i>查询
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <small class="text-muted">
+                                        <i class="bi bi-info-circle me-1"></i>
+                                        点击周行可展开查看详细内容
+                                    </small>
+                                </div>
+                            </div>
+                            
+                            <div id="weeklyListContainer">
+                                <div class="loading-spinner">
+                                    <div class="spinner-border" role="status"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -242,9 +356,25 @@
 <script>
 let currentQuickDays = 3;
 let currentQuickWeeks = 2;
+let currentDailyMode = 'single';
+let currentWeeklyMode = 'single';
 
 function initDateSelectors() {
     const today = new Date();
+    
+    const singleDate = document.getElementById('dailySingleDate');
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    singleDate.value = yesterday.toISOString().split('T')[0];
+    singleDate.max = today.toISOString().split('T')[0];
+    
+    const weekEndDate = document.getElementById('weekSingleEndDate');
+    const lastSunday = new Date(today);
+    const weekday = today.getDay();
+    const daysSinceSunday = weekday === 0 ? 7 : weekday;
+    lastSunday.setDate(today.getDate() - daysSinceSunday);
+    weekEndDate.value = lastSunday.toISOString().split('T')[0];
+    weekEndDate.max = today.toISOString().split('T')[0];
     
     const dailyStart = document.getElementById('dailyStartDate');
     const dailyEnd = document.getElementById('dailyEndDate');
@@ -258,11 +388,78 @@ function initDateSelectors() {
     dailyStart.max = today.toISOString().split('T')[0];
 }
 
+function switchDailyMode(mode) {
+    currentDailyMode = mode;
+    
+    const singleSection = document.getElementById('dailySingleSection');
+    const multiSection = document.getElementById('dailyMultiSection');
+    
+    if (mode === 'single') {
+        singleSection.classList.remove('hidden-section');
+        multiSection.classList.add('hidden-section');
+    } else {
+        singleSection.classList.add('hidden-section');
+        multiSection.classList.remove('hidden-section');
+        
+        if (document.getElementById('dailyListContainer').innerHTML.includes('spinner-border')) {
+            loadDailySummaries();
+        }
+    }
+}
+
+function switchWeeklyMode(mode) {
+    currentWeeklyMode = mode;
+    
+    const singleSection = document.getElementById('weeklySingleSection');
+    const multiSection = document.getElementById('weeklyMultiSection');
+    
+    if (mode === 'single') {
+        singleSection.classList.remove('hidden-section');
+        multiSection.classList.add('hidden-section');
+    } else {
+        singleSection.classList.add('hidden-section');
+        multiSection.classList.remove('hidden-section');
+        
+        if (document.getElementById('weeklyListContainer').innerHTML.includes('spinner-border')) {
+            loadWeeklySummaries();
+        }
+    }
+}
+
+function selectSingleDay(daysAgo, btn) {
+    document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    
+    const today = new Date();
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + daysAgo);
+    
+    document.getElementById('dailySingleDate').value = targetDate.toISOString().split('T')[0];
+    loadSingleDailySummary();
+}
+
+function selectSingleWeek(weeksAgo, btn) {
+    document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    
+    const today = new Date();
+    const weekday = today.getDay();
+    const daysSinceSunday = weekday === 0 ? 7 : weekday;
+    const lastSunday = new Date(today);
+    lastSunday.setDate(today.getDate() - daysSinceSunday);
+    
+    const targetDate = new Date(lastSunday);
+    targetDate.setDate(lastSunday.getDate() + (weeksAgo * 7));
+    
+    document.getElementById('weekSingleEndDate').value = targetDate.toISOString().split('T')[0];
+    loadSingleWeeklySummary();
+}
+
 function setQuickDays(days, btn) {
     currentQuickDays = days;
     
     document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+    if (btn) btn.classList.add('active');
     
     const today = new Date();
     const startDate = new Date(today);
@@ -278,10 +475,46 @@ function setQuickWeeks(weeks, btn) {
     currentQuickWeeks = weeks;
     
     document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+    if (btn) btn.classList.add('active');
     
     document.getElementById('weekCount').value = weeks;
     loadWeeklySummaries();
+}
+
+async function loadSingleDailySummary() {
+    const container = document.getElementById('dailySingleContainer');
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    
+    const date = document.getElementById('dailySingleDate').value;
+    
+    try {
+        const data = await apiCall(`/api/daily-summary?date=${date}`);
+        renderSingleDailySummary(data);
+    } catch (error) {
+        console.error('加载每日总结失败:', error);
+        container.innerHTML = '<div class="text-center text-danger py-4">加载数据失败</div>';
+    }
+}
+
+async function loadSingleWeeklySummary() {
+    const container = document.getElementById('weeklySingleContainer');
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    
+    const weekEnd = document.getElementById('weekSingleEndDate').value;
+    
+    try {
+        const weekEndDate = new Date(weekEnd);
+        const weekStartDate = new Date(weekEndDate);
+        weekStartDate.setDate(weekEndDate.getDate() - 6);
+        
+        const weekStart = weekStartDate.toISOString().split('T')[0];
+        
+        const data = await apiCall(`/api/weekly-summary?week_start=${weekStart}&week_end=${weekEnd}`);
+        renderSingleWeeklySummary(data);
+    } catch (error) {
+        console.error('加载每周总结失败:', error);
+        container.innerHTML = '<div class="text-center text-danger py-4">加载数据失败</div>';
+    }
 }
 
 async function loadDailySummaries() {
@@ -320,6 +553,162 @@ async function loadWeeklySummaries() {
         console.error('加载每周总结失败:', error);
         container.innerHTML = '<div class="text-center text-danger py-4">加载数据失败</div>';
     }
+}
+
+function renderSingleDailySummary(data) {
+    const container = document.getElementById('dailySingleContainer');
+    
+    if (!data || !data.exists) {
+        container.innerHTML = `
+            <div class="empty-summary">
+                <i class="bi bi-journal-x" style="font-size: 3rem; opacity: 0.3;"></i>
+                <p class="mt-3 mb-2">暂无 ${data?.date || '该日期'} 的每日总结</p>
+                <p class="text-muted small mb-0">请点击上方"执行今日总结"按钮生成</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const topics = data.topics || [];
+    const persistentCount = topics.filter(t => t.is_persistent).length;
+    
+    let html = `
+        <div class="alert alert-info mb-3">
+            <i class="bi bi-info-circle me-2"></i>
+            日期: <strong>${data.date}</strong>，共 <strong>${data.total_topics}</strong> 个话题
+            ${persistentCount > 0 ? `，其中 <strong>${persistentCount}</strong> 个持久话题` : ''}
+        </div>
+    `;
+    
+    if (data.summary_text) {
+        html += `
+            <div class="summary-box mb-4">
+                <h6><i class="bi bi-chat-left-text me-2"></i>AI总结</h6>
+                <p class="mb-0">${data.summary_text}</p>
+            </div>
+        `;
+    }
+    
+    html += `
+        <h6 class="mb-3"><i class="bi bi-fire me-2"></i>热门话题列表</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">排名</th>
+                        <th>话题标题</th>
+                        <th style="width: 100px;">出现次数</th>
+                        <th style="width: 100px;">最佳排名</th>
+                        <th style="width: 120px;">平均热度</th>
+                        <th style="width: 100px;">标签</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${topics.map(topic => `
+                        <tr>
+                            <td>
+                                <span class="rank-badge ${topic.rank <= 3 ? 'rank-top-3' : 'rank-other'}">${topic.rank}</span>
+                            </td>
+                            <td>
+                                ${topic.title}
+                                ${topic.persistence_reason ? `<br><small class="text-muted">${topic.persistence_reason}</small>` : ''}
+                            </td>
+                            <td><strong>${topic.appear_count}</strong>次</td>
+                            <td>第${topic.best_rank || '-'}名</td>
+                            <td>${formatHotValue(topic.avg_hot_value)}</td>
+                            <td>
+                                ${topic.is_persistent ? '<span class="persistent-tag">持久话题</span>' : '-'}
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+function renderSingleWeeklySummary(data) {
+    const container = document.getElementById('weeklySingleContainer');
+    
+    if (!data || !data.exists) {
+        container.innerHTML = `
+            <div class="empty-summary">
+                <i class="bi bi-journal-x" style="font-size: 3rem; opacity: 0.3;"></i>
+                <p class="mt-3 mb-2">暂无该周的每周总结</p>
+                <p class="text-muted small mb-0">请点击上方"执行本周总结"按钮生成</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const topics = data.topics || [];
+    const sustainedCount = topics.filter(t => t.is_sustained).length;
+    
+    let html = `
+        <div class="alert alert-info mb-3">
+            <i class="bi bi-info-circle me-2"></i>
+            周期: <strong>${data.week_start_date} 至 ${data.week_end_date}</strong>
+            <br>共 <strong>${data.total_daily_summaries}</strong> 天数据，<strong>${data.total_topics}</strong> 个话题
+            ${sustainedCount > 0 ? `，其中 <strong>${sustainedCount}</strong> 个持续话题` : ''}
+        </div>
+    `;
+    
+    if (data.summary_text) {
+        html += `
+            <div class="summary-box mb-4">
+                <h6><i class="bi bi-chat-left-text me-2"></i>AI总结</h6>
+                <p class="mb-0">${data.summary_text}</p>
+            </div>
+        `;
+    }
+    
+    html += `
+        <h6 class="mb-3"><i class="bi bi-fire me-2"></i>热门话题列表</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">排名</th>
+                        <th>话题标题</th>
+                        <th style="width: 100px;">出现天数</th>
+                        <th style="width: 120px;">热度趋势</th>
+                        <th style="width: 120px;">首次出现</th>
+                        <th style="width: 120px;">最后出现</th>
+                        <th style="width: 100px;">标签</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${topics.map(topic => `
+                        <tr>
+                            <td>
+                                <span class="rank-badge ${topic.rank <= 3 ? 'rank-top-3' : 'rank-other'}">${topic.rank}</span>
+                            </td>
+                            <td>
+                                ${topic.title}
+                                ${topic.heat_evolution ? `<br><small class="text-muted">${topic.heat_evolution}</small>` : ''}
+                                ${topic.sustained_reason ? `<br><small class="text-muted"><strong>持续原因:</strong> ${topic.sustained_reason}</small>` : ''}
+                            </td>
+                            <td><strong>${topic.appear_days}</strong>天</td>
+                            <td>
+                                <span class="${getTrendClass(topic.heat_trend)}">
+                                    ${getTrendIcon(topic.heat_trend)} ${topic.heat_trend || '稳定'}
+                                </span>
+                            </td>
+                            <td>${topic.first_appear_date || '-'}</td>
+                            <td>${topic.last_appear_date || '-'}</td>
+                            <td>
+                                ${topic.is_sustained ? '<span class="sustained-tag">持续话题</span>' : '-'}
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    container.innerHTML = html;
 }
 
 function renderDailyList(data) {
@@ -567,7 +956,11 @@ async function runDailySummaryTask() {
         
         if (result.success) {
             alert('每日总结任务执行成功！');
-            loadDailySummaries();
+            if (currentDailyMode === 'single') {
+                loadSingleDailySummary();
+            } else {
+                loadDailySummaries();
+            }
         } else {
             alert('每日总结任务执行失败: ' + (result.error || '未知错误'));
         }
@@ -590,7 +983,11 @@ async function runWeeklySummaryTask() {
         
         if (result.success) {
             alert('每周总结任务执行成功！');
-            loadWeeklySummaries();
+            if (currentWeeklyMode === 'single') {
+                loadSingleWeeklySummary();
+            } else {
+                loadWeeklySummaries();
+            }
         } else {
             alert('每周总结任务执行失败: ' + (result.error || '未知错误'));
         }
@@ -601,22 +998,37 @@ async function runWeeklySummaryTask() {
 }
 
 initDateSelectors();
-loadDailySummaries();
 
-const dailyTabTrigger = document.querySelector('a[href="#dailyListTab"]');
-const weeklyTabTrigger = document.querySelector('a[href="#weeklyListTab"]');
+loadSingleDailySummary();
+
+const dailyTabTrigger = document.querySelector('a[href="#dailyTab"]');
+const weeklyTabTrigger = document.querySelector('a[href="#weeklyTab"]');
 
 dailyTabTrigger.addEventListener('shown.bs.tab', function () {
-    const container = document.getElementById('dailyListContainer');
-    if (container.innerHTML.includes('spinner-border')) {
-        loadDailySummaries();
+    const container = document.getElementById('dailySingleContainer');
+    if (!container.innerHTML.includes('spinner-border') && 
+        !container.innerHTML.includes('bi-calendar-day') && 
+        !container.innerHTML.includes('bi-journal-x')) {
+    } else {
+        if (currentDailyMode === 'single') {
+            loadSingleDailySummary();
+        } else {
+            loadDailySummaries();
+        }
     }
 });
 
 weeklyTabTrigger.addEventListener('shown.bs.tab', function () {
-    const container = document.getElementById('weeklyListContainer');
-    if (container.innerHTML.includes('spinner-border')) {
-        loadWeeklySummaries();
+    const container = document.getElementById('weeklySingleContainer');
+    if (!container.innerHTML.includes('spinner-border') && 
+        !container.innerHTML.includes('bi-calendar-week') && 
+        !container.innerHTML.includes('bi-journal-x')) {
+    } else {
+        if (currentWeeklyMode === 'single') {
+            loadSingleWeeklySummary();
+        } else {
+            loadWeeklySummaries();
+        }
     }
 });
 </script>
