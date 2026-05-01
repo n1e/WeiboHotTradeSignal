@@ -17,5 +17,26 @@
   "report": {
     "output_dir": "./reports",
     "template_file": "./templates/report_template.html"
+  },
+  "schedule": {
+    "enabled": true,
+    "interval_minutes": 30,
+    "active_hours": "09:00-21:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "push": {
+    "enabled": true,
+    "feishu": {
+      "enabled": true,
+      "app_id": "your_feishu_app_id",
+      "app_secret": "your_feishu_app_secret",
+      "chat_id": "your_feishu_chat_id"
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "./logs/app.log",
+    "max_size_mb": 10,
+    "backup_count": 5
   }
 }

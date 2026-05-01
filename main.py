@@ -9,10 +9,17 @@ import os
 import sys
 import argparse
 from datetime import datetime
+from typing import Optional, Dict, Any
 
 from weibo_scraper import WeiboScraper
 from ai_analyzer import AIAnalyzer
 from report_generator import ReportGenerator
+from logger import setup_logger, get_logger, log_step, log_error, log_push_result
+from scheduler import TaskScheduler, run_with_scheduler
+from pusher.manager import PushManager, get_push_manager, reset_push_manager
+
+
+logger = None
 
 
 def load_config(config_path='config.json'):
@@ -38,12 +45,10 @@ def check_config(config):
     """检查配置是否完整"""
     errors = []
     
-    # 检查微博配置
     weibo_config = config.get('weibo', {})
     if not weibo_config.get('cookie_sub'):
         errors.append("缺少微博cookie_sub配置")
     
-    # 检查OpenRouter配置
     openrouter_config = config.get('openrouter', {})
     if not openrouter_config.get('api_key'):
         errors.append("缺少OpenRouter API密钥配置")
@@ -57,155 +62,219 @@ def check_config(config):
     return True
 
 
-def main():
-    """主函数"""
-    parser = argparse.ArgumentParser(description='微博热搜交易信号分析器')
-    parser.add_argument('-c', '--config', default='config.json', help='配置文件路径')
-    parser.add_argument('--skip-scrape', action='store_true', help='跳过数据采集，使用已有数据')
-    parser.add_argument('--skip-analysis', action='store_true', help='跳过AI分析')
-    parser.add_argument('--skip-report', action='store_true', help='跳过报告生成')
-    parser.add_argument('--test', action='store_true', help='使用测试数据运行')
+def init_logging(config):
+    """初始化日志系统"""
+    global logger
+    logging_config = config.get('logging', {})
+    setup_logger(logging_config)
+    logger = get_logger()
+
+
+def run_once(config, args):
+    """
+    执行一次完整的分析流程
     
-    args = parser.parse_args()
-    
-    print("=" * 60)
-    print("微博热搜交易信号分析器")
-    print(f"启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 60)
-    
-    # 加载配置
-    print("\n[1/4] 加载配置文件...")
-    config = load_config(args.config)
-    
-    if not config:
-        print("配置加载失败，程序退出")
-        sys.exit(1)
-    
-    print(f"配置文件加载成功: {args.config}")
-    
-    # 测试模式使用模拟数据
-    if args.test:
-        print("\n⚠️  测试模式：将使用模拟数据运行")
-        return run_test_mode(config)
-    
-    # 检查配置（非测试模式）
-    if not check_config(config):
-        print("配置不完整，程序退出")
-        sys.exit(1)
-    
-    # 步骤1: 数据采集
-    current_data = None
-    history_data = []
-    
-    if not args.skip_scrape:
-        print("\n[2/4] 采集微博热搜数据...")
+    Args:
+        config: 配置
+        args: 命令行参数
         
-        scraper = WeiboScraper(config)
+    Returns:
+        执行结果字典
+    """
+    result = {
+        'success': False,
+        'html_path': None,
+        'json_path': None,
+        'analysis_result': None,
+        'current_data': None,
+        'push_results': {}
+    }
+    
+    try:
+        logger.info("=" * 60)
+        logger.info("微博热搜交易信号分析器 - 单次执行")
+        logger.info(f"启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("=" * 60)
         
-        # 采集当前数据
-        current_data = scraper.run()
+        current_data = None
+        history_data = []
         
-        if not current_data:
-            print("数据采集失败，程序退出")
-            sys.exit(1)
-        
-        # 获取历史数据
-        history_data = scraper.get_history_data()
-        print(f"获取到 {len(history_data)} 条历史数据")
-    else:
-        print("\n[2/4] 跳过数据采集，尝试加载已有数据...")
-        
-        # 尝试加载最新的数据
-        storage_dir = config.get('data', {}).get('storage_dir', './data')
-        
-        if os.path.exists(storage_dir):
-            data_files = []
-            for filename in os.listdir(storage_dir):
-                if filename.startswith('weibo_hot_') and filename.endswith('.json'):
-                    filepath = os.path.join(storage_dir, filename)
-                    data_files.append(filepath)
+        if not args.skip_scrape:
+            log_step("数据采集", "开始采集微博热搜数据...")
             
-            if data_files:
-                # 按修改时间排序，取最新的
-                data_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                
-                # 加载最新的作为当前数据
-                try:
-                    with open(data_files[0], 'r', encoding='utf-8') as f:
-                        current_data = json.load(f)
-                    print(f"成功加载最新数据: {data_files[0]}")
-                except Exception as e:
-                    print(f"加载数据失败: {e}")
-                    current_data = None
-                
-                # 加载历史数据
-                for filepath in data_files[1:config.get('data', {}).get('history_days', 7)]:
-                    try:
-                        with open(filepath, 'r', encoding='utf-8') as f:
-                            history_data.append(json.load(f))
-                    except Exception as e:
-                        print(f"加载历史数据失败: {e}")
-                
-                print(f"获取到 {len(history_data)} 条历史数据")
-            else:
-                print("没有找到已有数据，请先运行数据采集")
-                sys.exit(1)
+            scraper = WeiboScraper(config)
+            
+            current_data = scraper.run()
+            
+            if not current_data:
+                log_error("数据采集", "数据采集失败")
+                return result
+            
+            history_data = scraper.get_history_data()
+            logger.info(f"获取到 {len(history_data)} 条历史数据")
         else:
-            print("数据目录不存在，请先运行数据采集")
-            sys.exit(1)
-    
-    # 步骤2: AI分析
-    analysis_result = None
-    
-    if not args.skip_analysis:
-        print("\n[3/4] AI分析数据...")
+            log_step("数据加载", "跳过数据采集，尝试加载已有数据...")
+            
+            storage_dir = config.get('data', {}).get('storage_dir', './data')
+            
+            if os.path.exists(storage_dir):
+                data_files = []
+                for filename in os.listdir(storage_dir):
+                    if filename.startswith('weibo_hot_') and filename.endswith('.json'):
+                        filepath = os.path.join(storage_dir, filename)
+                        data_files.append(filepath)
+                
+                if data_files:
+                    data_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                    
+                    try:
+                        with open(data_files[0], 'r', encoding='utf-8') as f:
+                            current_data = json.load(f)
+                        logger.info(f"成功加载最新数据: {data_files[0]}")
+                    except Exception as e:
+                        log_error("数据加载", f"加载数据失败: {e}")
+                        return result
+                    
+                    for filepath in data_files[1:config.get('data', {}).get('history_days', 7)]:
+                        try:
+                            with open(filepath, 'r', encoding='utf-8') as f:
+                                history_data.append(json.load(f))
+                        except Exception as e:
+                            logger.warning(f"加载历史数据失败: {e}")
+                    
+                    logger.info(f"获取到 {len(history_data)} 条历史数据")
+                else:
+                    log_error("数据加载", "没有找到已有数据，请先运行数据采集")
+                    return result
+            else:
+                log_error("数据加载", "数据目录不存在，请先运行数据采集")
+                return result
         
-        analyzer = AIAnalyzer(config)
-        analysis_result = analyzer.run_analysis(current_data, history_data)
+        result['current_data'] = current_data
         
-        if not analysis_result:
-            print("AI分析失败，但继续生成报告")
-    else:
-        print("\n[3/4] 跳过AI分析")
-    
-    # 步骤3: 生成报告
-    if not args.skip_report:
-        print("\n[4/4] 生成HTML报告...")
+        analysis_result = None
         
-        generator = ReportGenerator(config)
+        if not args.skip_analysis:
+            log_step("AI分析", "开始AI分析数据...")
+            
+            analyzer = AIAnalyzer(config)
+            analysis_result = analyzer.run_analysis(current_data, history_data)
+            
+            if not analysis_result:
+                logger.warning("AI分析失败，但继续生成报告")
         
-        # 生成HTML报告
-        html_path = generator.generate_report(current_data, analysis_result)
+        result['analysis_result'] = analysis_result
         
-        # 保存分析结果
-        if analysis_result:
-            json_path = generator.save_analysis_result(analysis_result)
+        html_path = None
+        json_path = None
         
-        print("\n" + "=" * 60)
-        print("处理完成！")
-        print("=" * 60)
+        if not args.skip_report:
+            log_step("报告生成", "开始生成HTML报告...")
+            
+            generator = ReportGenerator(config)
+            
+            html_path = generator.generate_report(current_data, analysis_result)
+            result['html_path'] = html_path
+            
+            if analysis_result:
+                json_path = generator.save_analysis_result(analysis_result)
+                result['json_path'] = json_path
+        
+        push_results = push_results_to_channels(config, analysis_result, html_path)
+        result['push_results'] = push_results
+        
+        result['success'] = True
+        
+        logger.info("=" * 60)
+        logger.info("单次执行完成！")
+        logger.info("=" * 60)
         
         if html_path:
-            print(f"\n📄 HTML报告: {html_path}")
+            logger.info(f"📄 HTML报告: {html_path}")
+        
+        if json_path:
+            logger.info(f"📊 分析结果: {json_path}")
+        
+        logger.info("\n⚠️  免责声明：本报告仅供参考，不构成任何投资建议。")
+        logger.info("      股市有风险，投资需谨慎。")
+        
+    except Exception as e:
+        log_error("主流程", f"执行过程中发生异常: {e}", e)
+        result['success'] = False
+    
+    return result
+
+
+def push_results_to_channels(config, analysis_result, html_path=None):
+    """
+    推送结果到各个渠道
+    
+    Args:
+        config: 配置
+        analysis_result: 分析结果
+        html_path: HTML报告路径
+        
+    Returns:
+        推送结果字典
+    """
+    push_results = {}
+    
+    try:
+        push_config = config.get('push', {})
+        
+        if not push_config.get('enabled', False):
+            logger.info("推送功能已禁用，跳过")
+            return push_results
+        
+        push_manager = PushManager(push_config)
+        
+        if not push_manager.is_available():
+            logger.info("没有可用的推送器，跳过推送")
+            return push_results
         
         if analysis_result:
-            print(f"📊 分析结果: {json_path}")
-        
-        print("\n⚠️  免责声明：本报告仅供参考，不构成任何投资建议。")
-        print("      股市有风险，投资需谨慎。")
-    else:
-        print("\n[4/4] 跳过报告生成")
+            title = f"微博热搜交易信号分析 - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            
+            log_step("推送", "开始推送分析结果...")
+            
+            push_results = push_manager.push_analysis_card(
+                title=title,
+                analysis_result=analysis_result,
+                html_path=html_path
+            )
+            
+            for pusher_name, success in push_results.items():
+                log_push_result(pusher_name, success, "分析卡片推送")
+        else:
+            logger.warning("没有分析结果，跳过推送")
     
-    print("\n" + "=" * 60)
-    print("程序执行完成")
-    print("=" * 60)
+    except Exception as e:
+        log_error("推送", f"推送过程中发生异常: {e}", e)
+    
+    return push_results
+
+
+def create_task_func(config, args):
+    """
+    创建任务函数（用于调度器）
+    
+    Args:
+        config: 配置
+        args: 命令行参数
+        
+    Returns:
+        任务函数
+    """
+    def task_func():
+        return run_once(config, args)
+    
+    return task_func
 
 
 def run_test_mode(config):
     """测试模式 - 使用模拟数据"""
-    print("\n[测试模式] 准备模拟数据...")
+    logger.info("\n[测试模式] 准备模拟数据...")
     
-    # 模拟当前数据
     current_data = {
         'timestamp': datetime.now().isoformat(),
         'hot_list': [
@@ -222,7 +291,6 @@ def run_test_mode(config):
         ]
     }
     
-    # 模拟历史数据
     history_data = [
         {
             'timestamp': '2026-04-20T10:00:00',
@@ -236,7 +304,6 @@ def run_test_mode(config):
         }
     ]
     
-    # 模拟分析结果
     analysis_result = {
         'timestamp': datetime.now().isoformat(),
         'trend_analysis': {
@@ -338,30 +405,105 @@ def run_test_mode(config):
         }
     }
     
-    print("\n[测试模式] 生成HTML报告...")
+    logger.info("\n[测试模式] 生成HTML报告...")
     
-    # 生成报告
     generator = ReportGenerator(config)
     
     html_path = generator.generate_report(current_data, analysis_result)
     json_path = generator.save_analysis_result(analysis_result)
     
-    print("\n" + "=" * 60)
-    print("测试模式执行完成！")
-    print("=" * 60)
+    push_config = config.get('push', {})
+    if push_config.get('enabled', False):
+        logger.info("\n[测试模式] 推送测试结果...")
+        push_manager = PushManager(push_config)
+        if push_manager.is_available():
+            title = f"[测试] 微博热搜交易信号分析 - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            push_manager.push_analysis_card(title, analysis_result, html_path)
+    
+    logger.info("\n" + "=" * 60)
+    logger.info("测试模式执行完成！")
+    logger.info("=" * 60)
     
     if html_path:
-        print(f"\n📄 HTML报告: {html_path}")
+        logger.info(f"\n📄 HTML报告: {html_path}")
     
     if json_path:
-        print(f"📊 分析结果: {json_path}")
+        logger.info(f"📊 分析结果: {json_path}")
     
-    print("\n⚠️  免责声明：本报告仅供参考，不构成任何投资建议。")
-    print("      股市有风险，投资需谨慎。")
+    logger.info("\n⚠️  免责声明：本报告仅供参考，不构成任何投资建议。")
+    logger.info("      股市有风险，投资需谨慎。")
     
-    print("\n" + "=" * 60)
-    print("程序执行完成")
+    return {
+        'success': True,
+        'html_path': html_path,
+        'json_path': json_path,
+        'analysis_result': analysis_result,
+        'current_data': current_data
+    }
+
+
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(description='微博热搜交易信号分析器')
+    parser.add_argument('-c', '--config', default='config.json', help='配置文件路径')
+    parser.add_argument('--skip-scrape', action='store_true', help='跳过数据采集，使用已有数据')
+    parser.add_argument('--skip-analysis', action='store_true', help='跳过AI分析')
+    parser.add_argument('--skip-report', action='store_true', help='跳过报告生成')
+    parser.add_argument('--skip-push', action='store_true', help='跳过推送')
+    parser.add_argument('--test', action='store_true', help='使用测试数据运行')
+    parser.add_argument('--daemon', action='store_true', help='以守护进程模式运行（定时调度）')
+    parser.add_argument('--once', action='store_true', help='仅执行一次（默认）')
+    
+    args = parser.parse_args()
+    
     print("=" * 60)
+    print("微博热搜交易信号分析器")
+    print(f"启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
+    
+    print("\n[1/4] 加载配置文件...")
+    config = load_config(args.config)
+    
+    if not config:
+        print("配置加载失败，程序退出")
+        sys.exit(1)
+    
+    print(f"配置文件加载成功: {args.config}")
+    
+    init_logging(config)
+    
+    if args.test:
+        logger.info("\n⚠️  测试模式：将使用模拟数据运行")
+        run_test_mode(config)
+        return
+    
+    if not check_config(config):
+        print("配置不完整，程序退出")
+        sys.exit(1)
+    
+    use_scheduler = args.daemon and not args.once
+    
+    if use_scheduler:
+        logger.info("启动调度器模式...")
+        task_func = create_task_func(config, args)
+        schedule_config = config.get('schedule', {})
+        
+        if not schedule_config.get('enabled', True):
+            logger.warning("调度器已在配置中禁用，退出")
+            sys.exit(0)
+        
+        scheduler = TaskScheduler(schedule_config, task_func)
+        scheduler.start()
+    else:
+        logger.info("启动单次执行模式...")
+        result = run_once(config, args)
+        
+        if result['success']:
+            logger.info("执行成功！")
+            sys.exit(0)
+        else:
+            logger.error("执行失败！")
+            sys.exit(1)
 
 
 if __name__ == '__main__':
