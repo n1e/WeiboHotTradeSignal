@@ -4,16 +4,42 @@
 
 {% block extra_css %}
 <style>
-    .summary-card {
+    .summary-list-card {
         border-left: 4px solid #667eea;
-        background: #f8f9fa;
-        padding: 15px;
+        background: white;
+        padding: 0;
         margin-bottom: 15px;
-        border-radius: 0 8px 8px 0;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        overflow: hidden;
+    }
+    
+    .summary-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px 20px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: all 0.3s ease;
+    }
+    
+    .summary-header:hover {
+        opacity: 0.95;
+    }
+    
+    .summary-content {
+        padding: 20px;
+        display: none;
+    }
+    
+    .summary-content.show {
+        display: block;
     }
     
     .persistent-tag {
-        background: #d1fae5;
+        background: rgba(16, 185, 129, 0.15);
         color: #065f46;
         font-size: 0.75rem;
         padding: 2px 8px;
@@ -21,23 +47,76 @@
     }
     
     .sustained-tag {
-        background: #dbeafe;
+        background: rgba(59, 130, 246, 0.15);
         color: #1e40af;
         font-size: 0.75rem;
         padding: 2px 8px;
         border-radius: 4px;
     }
     
-    .heat-trend-up {
-        color: #10b981;
+    .date-range-selector {
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
     
-    .heat-trend-down {
-        color: #ef4444;
+    .quick-selector {
+        display: flex;
+        gap: 5px;
     }
     
-    .heat-trend-stable {
-        color: #6b7280;
+    .quick-btn {
+        font-size: 0.8rem;
+        padding: 4px 10px;
+        border-radius: 4px;
+        border: 1px solid #667eea;
+        background: white;
+        color: #667eea;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .quick-btn:hover, .quick-btn.active {
+        background: #667eea;
+        color: white;
+    }
+    
+    .expand-icon {
+        transition: transform 0.3s ease;
+    }
+    
+    .expand-icon.rotated {
+        transform: rotate(180deg);
+    }
+    
+    .topic-mini-card {
+        background: #f8f9fa;
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+        border-left: 3px solid #667eea;
+    }
+    
+    .topic-mini-card .rank-badge {
+        width: 24px;
+        height: 24px;
+        font-size: 0.75rem;
+    }
+    
+    .empty-summary {
+        border: 2px dashed #dee2e6;
+        border-radius: 8px;
+        padding: 40px 20px;
+        text-align: center;
+        color: #6c757d;
+    }
+    
+    .stats-badge {
+        background: rgba(255,255,255,0.2);
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        margin-left: 8px;
     }
 </style>
 {% endblock %}
@@ -46,74 +125,107 @@
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
-            <div class="card-header">
-                <i class="bi bi-journal-text me-2"></i>热门话题总结资讯
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-journal-text me-2"></i>热门话题总结资讯</span>
+                <div class="d-flex align-items-center gap-3">
+                    <button class="btn btn-sm btn-success" onclick="runDailySummaryTask()">
+                        <i class="bi bi-play-circle me-1"></i>执行今日总结
+                    </button>
+                    <button class="btn btn-sm btn-info text-white" onclick="runWeeklySummaryTask()">
+                        <i class="bi bi-play-circle me-1"></i>执行本周总结
+                    </button>
+                </div>
             </div>
-            <div class="card-body">
-                <ul class="nav nav-tabs mb-3" id="summaryTabs">
-                    <li class="nav-item">
-                        <a class="nav-link active" data-bs-toggle="tab" href="#dailyTab">
-                            <i class="bi bi-calendar-day me-1"></i>每日总结
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" data-bs-toggle="tab" href="#weeklyTab">
-                            <i class="bi bi-calendar-week me-1"></i>每周总结
-                        </a>
-                    </li>
-                </ul>
-                
-                <div class="tab-content" id="tabContent">
-                    <div class="tab-pane fade show active" id="dailyTab">
-                        <div class="row mb-3 align-items-center">
-                            <div class="col-md-3">
-                                <label class="form-label"><i class="bi bi-calendar me-1"></i>选择日期</label>
-                                <input type="date" id="dailyDateSelector" class="form-control">
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <ul class="nav nav-tabs" id="summaryTabs">
+            <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#dailyListTab">
+                    <i class="bi bi-calendar-day me-1"></i>每日总结（多日对比）
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#weeklyListTab">
+                    <i class="bi bi-calendar-week me-1"></i>每周总结（多周对比）
+                </a>
+            </li>
+        </ul>
+        
+        <div class="tab-content" id="tabContent">
+            <div class="tab-pane fade show active" id="dailyListTab">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="row mb-4 align-items-center">
+                            <div class="col-md-8">
+                                <label class="form-label d-block"><i class="bi bi-filter me-1"></i>时间范围选择</label>
+                                <div class="d-flex flex-wrap align-items-center gap-3">
+                                    <div class="quick-selector">
+                                        <button class="quick-btn active" onclick="setQuickDays(3, this)">近3天</button>
+                                        <button class="quick-btn" onclick="setQuickDays(7, this)">近7天</button>
+                                        <button class="quick-btn" onclick="setQuickDays(14, this)">近14天</button>
+                                        <button class="quick-btn" onclick="setQuickDays(30, this)">近30天</button>
+                                    </div>
+                                    <span class="text-muted">或自定义：</span>
+                                    <div class="date-range-selector">
+                                        <input type="date" id="dailyStartDate" class="form-control form-control-sm" style="width: 140px;">
+                                        <span class="text-muted">至</span>
+                                        <input type="date" id="dailyEndDate" class="form-control form-control-sm" style="width: 140px;">
+                                    </div>
+                                    <button class="btn btn-sm btn-gradient" onclick="loadDailySummaries()">
+                                        <i class="bi bi-search me-1"></i>查询
+                                    </button>
+                                </div>
                             </div>
-                            <div class="col-md-3">
-                                <label class="form-label d-block">&nbsp;</label>
-                                <button class="btn btn-gradient" onclick="loadDailySummary()">
-                                    <i class="bi bi-search me-1"></i>查询
-                                </button>
-                            </div>
-                            <div class="col-md-6 text-end">
-                                <label class="form-label d-block">&nbsp;</label>
-                                <button class="btn btn-success" onclick="runDailySummaryTask()">
-                                    <i class="bi bi-play-circle me-1"></i>执行今日总结
-                                </button>
+                            <div class="col-md-4 text-end">
+                                <small class="text-muted">
+                                    <i class="bi bi-info-circle me-1"></i>
+                                    点击日期行可展开查看详细内容
+                                </small>
                             </div>
                         </div>
-                        <div id="dailyContent">
+                        
+                        <div id="dailyListContainer">
                             <div class="loading-spinner">
                                 <div class="spinner-border" role="status"></div>
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="tab-pane fade" id="weeklyTab">
-                        <div class="row mb-3 align-items-center">
-                            <div class="col-md-3">
-                                <label class="form-label"><i class="bi bi-calendar3 me-1"></i>周开始日期</label>
-                                <input type="date" id="weekStartSelector" class="form-control">
+                </div>
+            </div>
+            
+            <div class="tab-pane fade" id="weeklyListTab">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="row mb-4 align-items-center">
+                            <div class="col-md-8">
+                                <label class="form-label d-block"><i class="bi bi-filter me-1"></i>周数选择</label>
+                                <div class="d-flex flex-wrap align-items-center gap-3">
+                                    <div class="quick-selector">
+                                        <button class="quick-btn active" onclick="setQuickWeeks(2, this)">近2周</button>
+                                        <button class="quick-btn" onclick="setQuickWeeks(4, this)">近4周</button>
+                                        <button class="quick-btn" onclick="setQuickWeeks(8, this)">近8周</button>
+                                        <button class="quick-btn" onclick="setQuickWeeks(12, this)">近12周</button>
+                                    </div>
+                                    <span class="text-muted">或输入周数：</span>
+                                    <input type="number" id="weekCount" class="form-control form-control-sm" style="width: 80px;" value="2" min="1" max="52">
+                                    <button class="btn btn-sm btn-gradient" onclick="loadWeeklySummaries()">
+                                        <i class="bi bi-search me-1"></i>查询
+                                    </button>
+                                </div>
                             </div>
-                            <div class="col-md-3">
-                                <label class="form-label"><i class="bi bi-calendar3 me-1"></i>周结束日期</label>
-                                <input type="date" id="weekEndSelector" class="form-control">
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label d-block">&nbsp;</label>
-                                <button class="btn btn-gradient" onclick="loadWeeklySummary()">
-                                    <i class="bi bi-search me-1"></i>查询
-                                </button>
-                            </div>
-                            <div class="col-md-3 text-end">
-                                <label class="form-label d-block">&nbsp;</label>
-                                <button class="btn btn-success" onclick="runWeeklySummaryTask()">
-                                    <i class="bi bi-play-circle me-1"></i>执行本周总结
-                                </button>
+                            <div class="col-md-4 text-end">
+                                <small class="text-muted">
+                                    <i class="bi bi-info-circle me-1"></i>
+                                    点击周行可展开查看详细内容
+                                </small>
                             </div>
                         </div>
-                        <div id="weeklyContent">
+                        
+                        <div id="weeklyListContainer">
                             <div class="loading-spinner">
                                 <div class="spinner-border" role="status"></div>
                             </div>
@@ -128,271 +240,288 @@
 
 {% block extra_js %}
 <script>
+let currentQuickDays = 3;
+let currentQuickWeeks = 2;
+
 function initDateSelectors() {
     const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
     
-    const dailySelector = document.getElementById('dailyDateSelector');
-    dailySelector.value = yesterday.toISOString().split('T')[0];
-    dailySelector.max = today.toISOString().split('T')[0];
+    const dailyStart = document.getElementById('dailyStartDate');
+    const dailyEnd = document.getElementById('dailyEndDate');
     
-    const weekday = today.getDay();
-    const weekEnd = new Date(today);
-    weekEnd.setDate(today.getDate() - (weekday === 0 ? 7 : weekday));
+    dailyEnd.value = today.toISOString().split('T')[0];
+    dailyEnd.max = today.toISOString().split('T')[0];
     
-    const weekStart = new Date(weekEnd);
-    weekStart.setDate(weekEnd.getDate() - 6);
-    
-    document.getElementById('weekStartSelector').value = weekStart.toISOString().split('T')[0];
-    document.getElementById('weekEndSelector').value = weekEnd.toISOString().split('T')[0];
+    const threeDaysAgo = new Date(today);
+    threeDaysAgo.setDate(today.getDate() - 3);
+    dailyStart.value = threeDaysAgo.toISOString().split('T')[0];
+    dailyStart.max = today.toISOString().split('T')[0];
 }
 
-async function loadDailySummary() {
-    const date = document.getElementById('dailyDateSelector').value;
-    const container = document.getElementById('dailyContent');
+function setQuickDays(days, btn) {
+    currentQuickDays = days;
     
+    document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - days);
+    
+    document.getElementById('dailyEndDate').value = today.toISOString().split('T')[0];
+    document.getElementById('dailyStartDate').value = startDate.toISOString().split('T')[0];
+    
+    loadDailySummaries();
+}
+
+function setQuickWeeks(weeks, btn) {
+    currentQuickWeeks = weeks;
+    
+    document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    
+    document.getElementById('weekCount').value = weeks;
+    loadWeeklySummaries();
+}
+
+async function loadDailySummaries() {
+    const container = document.getElementById('dailyListContainer');
     container.innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
     
+    const startDate = document.getElementById('dailyStartDate').value;
+    const endDate = document.getElementById('dailyEndDate').value;
+    
     try {
-        const data = await apiCall(`/api/daily-summary?date=${date}`);
-        renderDailySummary(data);
+        let url = '/api/daily-summaries?';
+        if (startDate && endDate) {
+            url += `start_date=${startDate}&end_date=${endDate}`;
+        } else {
+            url += `days=${currentQuickDays}`;
+        }
+        
+        const data = await apiCall(url);
+        renderDailyList(data);
     } catch (error) {
         console.error('加载每日总结失败:', error);
         container.innerHTML = '<div class="text-center text-danger py-4">加载数据失败</div>';
     }
 }
 
-async function loadWeeklySummary() {
-    const weekStart = document.getElementById('weekStartSelector').value;
-    const weekEnd = document.getElementById('weekEndSelector').value;
-    const container = document.getElementById('weeklyContent');
-    
+async function loadWeeklySummaries() {
+    const container = document.getElementById('weeklyListContainer');
     container.innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
     
+    const weeks = document.getElementById('weekCount').value || currentQuickWeeks;
+    
     try {
-        const data = await apiCall(`/api/weekly-summary?week_start=${weekStart}&week_end=${weekEnd}`);
-        renderWeeklySummary(data);
+        const data = await apiCall(`/api/weekly-summaries?weeks=${weeks}`);
+        renderWeeklyList(data);
     } catch (error) {
         console.error('加载每周总结失败:', error);
         container.innerHTML = '<div class="text-center text-danger py-4">加载数据失败</div>';
     }
 }
 
-function renderDailySummary(data) {
-    const container = document.getElementById('dailyContent');
+function renderDailyList(data) {
+    const container = document.getElementById('dailyListContainer');
     
-    if (!data.exists || !data.topics || data.topics.length === 0) {
+    if (!data || !data.summaries || data.summaries.length === 0) {
         container.innerHTML = `
-            <div class="empty-state">
-                <i class="bi bi-journal-x"></i>
-                <p>暂无 ${data.date} 的每日总结数据</p>
-                <p class="text-muted small">请点击上方"执行今日总结"按钮生成</p>
+            <div class="empty-summary">
+                <i class="bi bi-journal-x" style="font-size: 3rem; opacity: 0.3;"></i>
+                <p class="mt-3 mb-2">暂无每日总结数据</p>
+                <p class="text-muted small mb-0">请点击上方"执行今日总结"按钮生成</p>
             </div>
         `;
         return;
     }
     
-    let html = `
-        <div class="alert alert-info mb-4">
-            <div class="row">
-                <div class="col-md-3">
-                    <strong><i class="bi bi-calendar-day me-1"></i>总结日期:</strong> ${data.date}
-                </div>
-                <div class="col-md-3">
-                    <strong><i class="bi bi-database me-1"></i>快照数量:</strong> ${data.total_snapshots || 0}
-                </div>
-                <div class="col-md-3">
-                    <strong><i class="bi bi-fire me-1"></i>话题数量:</strong> ${data.total_topics || 0}
-                </div>
-                <div class="col-md-3">
-                    <strong><i class="bi bi-check-circle me-1"></i>状态:</strong> 
-                    <span class="text-success">已生成</span>
-                </div>
-            </div>
-        </div>
-    `;
+    let html = `<div class="alert alert-info mb-3">
+        <i class="bi bi-info-circle me-2"></i>
+        查询时间范围: ${data.start_date} 至 ${data.end_date}，共找到 <strong>${data.count}</strong> 条每日总结
+    </div>`;
     
-    if (data.summary_text) {
-        html += `
-            <div class="summary-box mb-4">
-                <h3><i class="bi bi-chat-left-text me-2"></i>AI总结</h3>
-                <p class="mb-0">${data.summary_text}</p>
-            </div>
-        `;
-    }
-    
-    html += `
-        <h5 class="mb-3"><i class="bi bi-list-ol me-2"></i>热门话题列表</h5>
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th style="width: 80px;">排名</th>
-                        <th>话题标题</th>
-                        <th style="width: 100px;">出现次数</th>
-                        <th style="width: 100px;">最佳排名</th>
-                        <th style="width: 120px;">平均热度</th>
-                        <th style="width: 120px;">最高热度</th>
-                        <th style="width: 100px;">标签</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-    
-    data.topics.forEach(topic => {
-        const badgeClass = topic.rank <= 3 ? 'rank-top-3' : 'rank-other';
-        const persistentTag = topic.is_persistent ? '<span class="persistent-tag">持久话题</span>' : '';
+    data.summaries.forEach((summary, idx) => {
+        const dateStr = summary.summary_date;
+        const topics = summary.topics || [];
+        const persistentCount = topics.filter(t => t.is_persistent).length;
         
         html += `
-            <tr>
-                <td><span class="rank-badge ${badgeClass}">${topic.rank}</span></td>
-                <td>
+            <div class="summary-list-card">
+                <div class="summary-header" onclick="toggleSummary(this, 'daily-${idx}')">
                     <div class="d-flex align-items-center">
-                        <span>${topic.title}</span>
-                        ${persistentTag ? `<span class="ms-2">${persistentTag}</span>` : ''}
+                        <i class="bi bi-calendar-day me-2" style="font-size: 1.2rem;"></i>
+                        <span style="font-size: 1.1rem; font-weight: 600;">${dateStr}</span>
+                        <span class="stats-badge">${summary.total_topics || 0} 个话题</span>
+                        ${persistentCount > 0 ? `<span class="stats-badge"><i class="bi bi-star-fill me-1"></i>${persistentCount} 个持久话题</span>` : ''}
                     </div>
-                    ${topic.persistence_reason ? `<small class="text-muted">${topic.persistence_reason}</small>` : ''}
-                </td>
-                <td><strong>${topic.appear_count}</strong>次</td>
-                <td>第${topic.best_rank || '-'}名</td>
-                <td>${formatHotValue(topic.avg_hot_value)}</td>
-                <td>${formatHotValue(topic.max_hot_value)}</td>
-                <td>${persistentTag || '-'}</td>
-            </tr>
+                    <div class="d-flex align-items-center gap-3">
+                        ${summary.summary_text ? `<i class="bi bi-chat-square-text" title="有AI总结"></i>` : ''}
+                        <i class="bi bi-chevron-down expand-icon" id="icon-daily-${idx}"></i>
+                    </div>
+                </div>
+                <div class="summary-content" id="content-daily-${idx}">
+                    ${summary.summary_text ? `
+                        <div class="summary-box mb-4">
+                            <h6><i class="bi bi-chat-left-text me-2"></i>AI总结</h6>
+                            <p class="mb-0 small">${summary.summary_text}</p>
+                        </div>
+                    ` : ''}
+                    
+                    <h6 class="mb-3"><i class="bi bi-fire me-2"></i>热门话题 TOP 20</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th style="width: 60px;">排名</th>
+                                    <th>话题标题</th>
+                                    <th style="width: 100px;">出现次数</th>
+                                    <th style="width: 100px;">最佳排名</th>
+                                    <th style="width: 120px;">平均热度</th>
+                                    <th style="width: 100px;">标签</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${topics.map(topic => `
+                                    <tr>
+                                        <td>
+                                            <span class="rank-badge ${topic.rank <= 3 ? 'rank-top-3' : 'rank-other'}">${topic.rank}</span>
+                                        </td>
+                                        <td>
+                                            ${topic.title}
+                                            ${topic.persistence_reason ? `<br><small class="text-muted">${topic.persistence_reason}</small>` : ''}
+                                        </td>
+                                        <td><strong>${topic.appear_count}</strong>次</td>
+                                        <td>第${topic.best_rank || '-'}名</td>
+                                        <td>${formatHotValue(topic.avg_hot_value)}</td>
+                                        <td>
+                                            ${topic.is_persistent ? '<span class="persistent-tag">持久话题</span>' : '-'}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    ${topics.length === 0 ? '<p class="text-muted text-center py-3">暂无话题数据</p>' : ''}
+                </div>
+            </div>
         `;
     });
-    
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
     
     container.innerHTML = html;
 }
 
-function renderWeeklySummary(data) {
-    const container = document.getElementById('weeklyContent');
+function renderWeeklyList(data) {
+    const container = document.getElementById('weeklyListContainer');
     
-    if (!data.exists || !data.topics || data.topics.length === 0) {
+    if (!data || !data.summaries || data.summaries.length === 0) {
         container.innerHTML = `
-            <div class="empty-state">
-                <i class="bi bi-journal-x"></i>
-                <p>暂无 ${data.week_start} 至 ${data.week_end} 的每周总结数据</p>
-                <p class="text-muted small">请点击上方"执行本周总结"按钮生成</p>
+            <div class="empty-summary">
+                <i class="bi bi-journal-x" style="font-size: 3rem; opacity: 0.3;"></i>
+                <p class="mt-3 mb-2">暂无每周总结数据</p>
+                <p class="text-muted small mb-0">请点击上方"执行本周总结"按钮生成</p>
             </div>
         `;
         return;
     }
     
-    let html = `
-        <div class="alert alert-info mb-4">
-            <div class="row">
-                <div class="col-md-4">
-                    <strong><i class="bi bi-calendar-week me-1"></i>总结周期:</strong> 
-                    ${data.week_start_date} 至 ${data.week_end_date}
-                </div>
-                <div class="col-md-3">
-                    <strong><i class="bi bi-journal me-1"></i>每日总结:</strong> ${data.total_daily_summaries || 0}天
-                </div>
-                <div class="col-md-3">
-                    <strong><i class="bi bi-fire me-1"></i>话题数量:</strong> ${data.total_topics || 0}
-                </div>
-                <div class="col-md-2">
-                    <strong><i class="bi bi-check-circle me-1"></i>状态:</strong> 
-                    <span class="text-success">已生成</span>
-                </div>
-            </div>
-        </div>
-    `;
+    let html = `<div class="alert alert-info mb-3">
+        <i class="bi bi-info-circle me-2"></i>
+        共找到 <strong>${data.count}</strong> 条每周总结
+    </div>`;
     
-    if (data.summary_text) {
-        html += `
-            <div class="summary-box mb-4">
-                <h3><i class="bi bi-chat-left-text me-2"></i>AI总结</h3>
-                <p class="mb-0">${data.summary_text}</p>
-            </div>
-        `;
-    }
-    
-    html += `
-        <h5 class="mb-3"><i class="bi bi-list-ol me-2"></i>热门话题列表</h5>
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th style="width: 80px;">排名</th>
-                        <th>话题标题</th>
-                        <th style="width: 100px;">出现天数</th>
-                        <th style="width: 120px;">热度趋势</th>
-                        <th style="width: 100px;">标签</th>
-                        <th style="width: 120px;">首次出现</th>
-                        <th style="width: 120px;">最后出现</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-    
-    data.topics.forEach(topic => {
-        const badgeClass = topic.rank <= 3 ? 'rank-top-3' : 'rank-other';
-        const sustainedTag = topic.is_sustained ? '<span class="sustained-tag">持续话题</span>' : '';
-        
-        let trendClass = 'heat-trend-stable';
-        let trendIcon = 'bi-dash';
-        if (topic.heat_trend) {
-            if (topic.heat_trend.includes('上升') || topic.heat_trend.includes('增长')) {
-                trendClass = 'heat-trend-up';
-                trendIcon = 'bi-arrow-up';
-            } else if (topic.heat_trend.includes('下降') || topic.heat_trend.includes('减少')) {
-                trendClass = 'heat-trend-down';
-                trendIcon = 'bi-arrow-down';
-            }
-        }
+    data.summaries.forEach((summary, idx) => {
+        const weekStart = summary.week_start_date;
+        const weekEnd = summary.week_end_date;
+        const topics = summary.topics || [];
+        const sustainedCount = topics.filter(t => t.is_sustained).length;
         
         html += `
-            <tr>
-                <td><span class="rank-badge ${badgeClass}">${topic.rank}</span></td>
-                <td>
+            <div class="summary-list-card">
+                <div class="summary-header" onclick="toggleSummary(this, 'weekly-${idx}')">
                     <div class="d-flex align-items-center">
-                        <span>${topic.title}</span>
-                        ${sustainedTag ? `<span class="ms-2">${sustainedTag}</span>` : ''}
+                        <i class="bi bi-calendar-week me-2" style="font-size: 1.2rem;"></i>
+                        <span style="font-size: 1.1rem; font-weight: 600;">${weekStart} 至 ${weekEnd}</span>
+                        <span class="stats-badge">${summary.total_daily_summaries || 0} 天数据</span>
+                        <span class="stats-badge">${summary.total_topics || 0} 个话题</span>
+                        ${sustainedCount > 0 ? `<span class="stats-badge"><i class="bi bi-award-fill me-1"></i>${sustainedCount} 个持续话题</span>` : ''}
                     </div>
-                    ${topic.sustained_reason ? `<small class="text-muted">${topic.sustained_reason}</small>` : ''}
-                </td>
-                <td><strong>${topic.appear_days}</strong>天</td>
-                <td>
-                    <span class="${trendClass}">
-                        <i class="bi ${trendIcon} me-1"></i>
-                        ${topic.heat_trend || '稳定'}
-                    </span>
-                </td>
-                <td>${sustainedTag || '-'}</td>
-                <td>${topic.first_appear_date || '-'}</td>
-                <td>${topic.last_appear_date || '-'}</td>
-            </tr>
-        `;
-        
-        if (topic.heat_evolution) {
-            html += `
-                <tr>
-                    <td colspan="7">
-                        <div class="summary-box p-3 mb-0">
-                            <small><strong>热度演变分析:</strong> ${topic.heat_evolution}</small>
+                    <div class="d-flex align-items-center gap-3">
+                        ${summary.summary_text ? `<i class="bi bi-chat-square-text" title="有AI总结"></i>` : ''}
+                        <i class="bi bi-chevron-down expand-icon" id="icon-weekly-${idx}"></i>
+                    </div>
+                </div>
+                <div class="summary-content" id="content-weekly-${idx}">
+                    ${summary.summary_text ? `
+                        <div class="summary-box mb-4">
+                            <h6><i class="bi bi-chat-left-text me-2"></i>AI总结</h6>
+                            <p class="mb-0 small">${summary.summary_text}</p>
                         </div>
-                    </td>
-                </tr>
-            `;
-        }
+                    ` : ''}
+                    
+                    <h6 class="mb-3"><i class="bi bi-fire me-2"></i>热门话题 TOP 20</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th style="width: 60px;">排名</th>
+                                    <th>话题标题</th>
+                                    <th style="width: 100px;">出现天数</th>
+                                    <th style="width: 120px;">热度趋势</th>
+                                    <th style="width: 120px;">首次出现</th>
+                                    <th style="width: 120px;">最后出现</th>
+                                    <th style="width: 100px;">标签</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${topics.map(topic => `
+                                    <tr>
+                                        <td>
+                                            <span class="rank-badge ${topic.rank <= 3 ? 'rank-top-3' : 'rank-other'}">${topic.rank}</span>
+                                        </td>
+                                        <td>
+                                            ${topic.title}
+                                            ${topic.heat_evolution ? `<br><small class="text-muted">${topic.heat_evolution}</small>` : ''}
+                                            ${topic.sustained_reason ? `<br><small class="text-muted"><strong>持续原因:</strong> ${topic.sustained_reason}</small>` : ''}
+                                        </td>
+                                        <td><strong>${topic.appear_days}</strong>天</td>
+                                        <td>
+                                            <span class="${getTrendClass(topic.heat_trend)}">
+                                                ${getTrendIcon(topic.heat_trend)} ${topic.heat_trend || '稳定'}
+                                            </span>
+                                        </td>
+                                        <td>${topic.first_appear_date || '-'}</td>
+                                        <td>${topic.last_appear_date || '-'}</td>
+                                        <td>
+                                            ${topic.is_sustained ? '<span class="sustained-tag">持续话题</span>' : '-'}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    ${topics.length === 0 ? '<p class="text-muted text-center py-3">暂无话题数据</p>' : ''}
+                </div>
+            </div>
+        `;
     });
     
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
-    
     container.innerHTML = html;
+}
+
+function toggleSummary(header, id) {
+    const content = document.getElementById(`content-${id}`);
+    const icon = document.getElementById(`icon-${id}`);
+    
+    if (content.classList.contains('show')) {
+        content.classList.remove('show');
+        icon.classList.remove('rotated');
+    } else {
+        content.classList.add('show');
+        icon.classList.add('rotated');
+    }
 }
 
 function formatHotValue(value) {
@@ -401,6 +530,28 @@ function formatHotValue(value) {
         return (value / 10000).toFixed(0) + '万';
     }
     return value.toFixed(0);
+}
+
+function getTrendClass(trend) {
+    if (!trend) return '';
+    if (trend.includes('上升') || trend.includes('增长') || trend.includes('增加')) {
+        return 'heat-trend-up';
+    }
+    if (trend.includes('下降') || trend.includes('减少')) {
+        return 'heat-trend-down';
+    }
+    return 'heat-trend-stable';
+}
+
+function getTrendIcon(trend) {
+    if (!trend) return '<i class="bi bi-dash"></i>';
+    if (trend.includes('上升') || trend.includes('增长') || trend.includes('增加')) {
+        return '<i class="bi bi-arrow-up"></i>';
+    }
+    if (trend.includes('下降') || trend.includes('减少')) {
+        return '<i class="bi bi-arrow-down"></i>';
+    }
+    return '<i class="bi bi-dash"></i>';
 }
 
 async function runDailySummaryTask() {
@@ -416,7 +567,7 @@ async function runDailySummaryTask() {
         
         if (result.success) {
             alert('每日总结任务执行成功！');
-            loadDailySummary();
+            loadDailySummaries();
         } else {
             alert('每日总结任务执行失败: ' + (result.error || '未知错误'));
         }
@@ -439,7 +590,7 @@ async function runWeeklySummaryTask() {
         
         if (result.success) {
             alert('每周总结任务执行成功！');
-            loadWeeklySummary();
+            loadWeeklySummaries();
         } else {
             alert('每周总结任务执行失败: ' + (result.error || '未知错误'));
         }
@@ -450,6 +601,23 @@ async function runWeeklySummaryTask() {
 }
 
 initDateSelectors();
-loadDailySummary();
+loadDailySummaries();
+
+const dailyTabTrigger = document.querySelector('a[href="#dailyListTab"]');
+const weeklyTabTrigger = document.querySelector('a[href="#weeklyListTab"]');
+
+dailyTabTrigger.addEventListener('shown.bs.tab', function () {
+    const container = document.getElementById('dailyListContainer');
+    if (container.innerHTML.includes('spinner-border')) {
+        loadDailySummaries();
+    }
+});
+
+weeklyTabTrigger.addEventListener('shown.bs.tab', function () {
+    const container = document.getElementById('weeklyListContainer');
+    if (container.innerHTML.includes('spinner-border')) {
+        loadWeeklySummaries();
+    }
+});
 </script>
 {% endblock %}

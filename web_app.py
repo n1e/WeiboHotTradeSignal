@@ -459,6 +459,186 @@ def api_weekly_summary():
     })
 
 
+@app.route('/api/daily-summaries')
+def api_daily_summaries():
+    """获取一段时间内的每日总结列表"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    days = request.args.get('days', 7)
+    
+    try:
+        days = int(days)
+    except:
+        days = 7
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': '无效的日期格式'}), 400
+    else:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days - 1)
+    
+    start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    try:
+        import duckdb
+        
+        with duckdb.connect(storage.db_path) as conn:
+            summaries = conn.execute("""
+                SELECT id, summary_date, total_snapshots, total_topics, summary_text, created_at, updated_at
+                FROM daily_hot_topic_summaries
+                WHERE summary_date >= ? AND summary_date <= ?
+                ORDER BY summary_date DESC
+            """, [start_date.date(), end_date.date()]).fetchall()
+            
+            result = []
+            for summary_row in summaries:
+                summary_id, summary_date, total_snapshots, total_topics, summary_text, created_at, updated_at = summary_row
+                
+                topics = conn.execute("""
+                    SELECT rank, title, appear_count, best_rank, avg_hot_value, max_hot_value,
+                           first_appear_time, last_appear_time, is_persistent, persistence_reason
+                    FROM daily_hot_topic_items
+                    WHERE daily_summary_id = ?
+                    ORDER BY rank
+                    LIMIT 20
+                """, [summary_id]).fetchall()
+                
+                topic_list = []
+                for row in topics:
+                    rank, title, appear_count, best_rank, avg_hot_value, max_hot_value, \
+                        first_appear_time, last_appear_time, is_persistent, persistence_reason = row
+                    
+                    topic_list.append({
+                        'rank': rank,
+                        'title': title,
+                        'appear_count': appear_count,
+                        'best_rank': best_rank,
+                        'avg_hot_value': avg_hot_value,
+                        'max_hot_value': max_hot_value,
+                        'first_appear_time': first_appear_time.isoformat() if first_appear_time else None,
+                        'last_appear_time': last_appear_time.isoformat() if last_appear_time else None,
+                        'is_persistent': is_persistent,
+                        'persistence_reason': persistence_reason
+                    })
+                
+                result.append({
+                    'id': summary_id,
+                    'summary_date': summary_date.isoformat(),
+                    'total_snapshots': total_snapshots,
+                    'total_topics': total_topics,
+                    'summary_text': summary_text,
+                    'topics': topic_list,
+                    'created_at': created_at.isoformat() if created_at else None,
+                    'updated_at': updated_at.isoformat() if updated_at else None
+                })
+            
+            return jsonify({
+                'start_date': start_date.strftime('%Y-%m-%d'),
+                'end_date': end_date.strftime('%Y-%m-%d'),
+                'count': len(result),
+                'summaries': result
+            })
+            
+    except Exception as e:
+        print(f"获取每日总结列表失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/weekly-summaries')
+def api_weekly_summaries():
+    """获取一段时间内的每周总结列表"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    weeks = request.args.get('weeks', 4)
+    
+    try:
+        weeks = int(weeks)
+    except:
+        weeks = 4
+    
+    today = datetime.now()
+    
+    try:
+        import duckdb
+        
+        with duckdb.connect(storage.db_path) as conn:
+            summaries = conn.execute("""
+                SELECT id, week_start_date, week_end_date, total_daily_summaries, total_topics, summary_text, created_at, updated_at
+                FROM weekly_hot_topic_summaries
+                ORDER BY week_start_date DESC
+                LIMIT ?
+            """, [weeks]).fetchall()
+            
+            result = []
+            for summary_row in summaries:
+                summary_id, week_start_date, week_end_date, total_daily_summaries, total_topics, summary_text, created_at, updated_at = summary_row
+                
+                topics = conn.execute("""
+                    SELECT rank, title, appear_days, daily_appear_detail, heat_trend, heat_evolution,
+                           first_appear_date, last_appear_date, is_sustained, sustained_reason
+                    FROM weekly_hot_topic_items
+                    WHERE weekly_summary_id = ?
+                    ORDER BY rank
+                    LIMIT 20
+                """, [summary_id]).fetchall()
+                
+                topic_list = []
+                for row in topics:
+                    rank, title, appear_days, daily_appear_detail, heat_trend, heat_evolution, \
+                        first_appear_date, last_appear_date, is_sustained, sustained_reason = row
+                    
+                    daily_detail = {}
+                    if daily_appear_detail:
+                        try:
+                            import json
+                            daily_detail = json.loads(daily_appear_detail)
+                        except:
+                            pass
+                    
+                    topic_list.append({
+                        'rank': rank,
+                        'title': title,
+                        'appear_days': appear_days,
+                        'daily_appear_detail': daily_detail,
+                        'heat_trend': heat_trend,
+                        'heat_evolution': heat_evolution,
+                        'first_appear_date': first_appear_date.isoformat() if first_appear_date else None,
+                        'last_appear_date': last_appear_date.isoformat() if last_appear_date else None,
+                        'is_sustained': is_sustained,
+                        'sustained_reason': sustained_reason
+                    })
+                
+                result.append({
+                    'id': summary_id,
+                    'week_start_date': week_start_date.isoformat(),
+                    'week_end_date': week_end_date.isoformat(),
+                    'total_daily_summaries': total_daily_summaries,
+                    'total_topics': total_topics,
+                    'summary_text': summary_text,
+                    'topics': topic_list,
+                    'created_at': created_at.isoformat() if created_at else None,
+                    'updated_at': updated_at.isoformat() if updated_at else None
+                })
+            
+            return jsonify({
+                'count': len(result),
+                'summaries': result
+            })
+            
+    except Exception as e:
+        print(f"获取每周总结列表失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/task/run', methods=['POST'])
 def api_run_task():
     """执行任务"""
