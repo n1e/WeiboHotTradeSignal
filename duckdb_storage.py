@@ -1174,6 +1174,99 @@ class DuckDBStorage:
         weekly_success = self.clear_weekly_hot_topics()
         
         return daily_success and weekly_success
+    
+    def get_daily_unique_titles(self, target_date: datetime = None) -> List[Dict]:
+        """
+        获取当日所有快照的不重复热搜标题，按首次出现时间排序
+        
+        Args:
+            target_date: 目标日期，默认为今天
+            
+        Returns:
+            不重复的热搜标题列表，每个元素包含:
+                - title: 标题
+                - first_appear_time: 首次出现时间
+                - last_appear_time: 最后出现时间
+                - appear_count: 出现次数
+        """
+        if target_date is None:
+            target_date = datetime.now()
+        
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT 
+                        title,
+                        MIN(snapshot_time) as first_appear_time,
+                        MAX(snapshot_time) as last_appear_time,
+                        COUNT(*) as appear_count
+                    FROM hot_search_items
+                    WHERE snapshot_time >= ? AND snapshot_time <= ?
+                    GROUP BY title
+                    ORDER BY first_appear_time ASC
+                """, [start_of_day, end_of_day]).fetchall()
+                
+                unique_titles = []
+                for row in results:
+                    title, first_appear, last_appear, appear_count = row
+                    unique_titles.append({
+                        'title': title,
+                        'first_appear_time': first_appear.isoformat() if first_appear else None,
+                        'last_appear_time': last_appear.isoformat() if last_appear else None,
+                        'appear_count': appear_count
+                    })
+                
+                return unique_titles
+                
+        except Exception as e:
+            print(f"获取当日不重复热搜标题失败: {e}")
+            return []
+    
+    def get_daily_titles_by_snapshot(self, target_date: datetime = None) -> List[Dict]:
+        """
+        获取当日所有快照的完整热搜标题列表（按时间顺序，带快照时间）
+        
+        Args:
+            target_date: 目标日期，默认为今天
+            
+        Returns:
+            按快照时间排序的标题列表，每个元素包含:
+                - snapshot_time: 快照时间
+                - title: 标题
+        """
+        if target_date is None:
+            target_date = datetime.now()
+        
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT 
+                        snapshot_time,
+                        title
+                    FROM hot_search_items
+                    WHERE snapshot_time >= ? AND snapshot_time <= ?
+                    ORDER BY snapshot_time ASC, rank ASC
+                """, [start_of_day, end_of_day]).fetchall()
+                
+                title_list = []
+                for row in results:
+                    snapshot_time, title = row
+                    title_list.append({
+                        'snapshot_time': snapshot_time.isoformat() if snapshot_time else None,
+                        'title': title
+                    })
+                
+                return title_list
+                
+        except Exception as e:
+            print(f"获取当日快照标题列表失败: {e}")
+            return []
 
 
 def main():
