@@ -17,6 +17,8 @@ from report_generator import ReportGenerator
 from logger import setup_logger, get_logger, log_step, log_error, log_push_result
 from scheduler import TaskScheduler, run_with_scheduler, CombinedScheduler
 from pusher.manager import PushManager, get_push_manager, reset_push_manager
+from duckdb_storage import DuckDBStorage
+from anomaly_detector import AnomalyDetector, run_anomaly_detection
 
 
 logger = None
@@ -184,7 +186,10 @@ def run_once(config, args):
                 json_path = generator.save_analysis_result(analysis_result)
                 result['json_path'] = json_path
         
-        push_results = push_results_to_channels(config, analysis_result, html_path)
+        alert_result = run_anomaly_detection_for_current_data(config, current_data)
+        result['alert_result'] = alert_result
+        
+        push_results = push_results_to_channels(config, analysis_result, html_path, current_data)
         result['push_results'] = push_results
         
         result['success'] = True
@@ -209,7 +214,79 @@ def run_once(config, args):
     return result
 
 
-def push_results_to_channels(config, analysis_result, html_path=None):
+def run_anomaly_detection_for_current_data(config, current_data):
+    """
+    执行异常检测并推送预警
+    
+    Args:
+        config: 配置
+        current_data: 当前快照数据
+        
+    Returns:
+        检测结果字典
+    """
+    result = {
+        'success': False,
+        'alert_count': 0,
+        'push_success': False,
+        'alerts': []
+    }
+    
+    try:
+        storage = DuckDBStorage(config)
+        detector = AnomalyDetector(config, storage)
+        
+        if not current_data:
+            logger.warning("没有快照数据，跳过异常检测")
+            return result
+        
+        alerts = detector.detect_all(current_data)
+        result['alerts'] = alerts
+        result['alert_count'] = len(alerts)
+        
+        if alerts:
+            saved_ids = detector.save_alerts(alerts)
+            result['saved_ids'] = saved_ids
+            
+            push_config = config.get('push', {})
+            if push_config.get('enabled', False):
+                push_manager = PushManager(push_config)
+                
+                if push_manager.is_available():
+                    alerts_to_push = [a for a in alerts if detector.should_push(a)]
+                    
+                    if alerts_to_push:
+                        log_step("推送", f"准备推送 {len(alerts_to_push)} 个预警事件...")
+                        
+                        push_result = push_manager.push_alert(alerts_to_push)
+                        
+                        if push_result:
+                            success_count = sum(1 for v in push_result.values() if v)
+                            if success_count > 0:
+                                result['push_success'] = True
+                                for alert in alerts_to_push:
+                                    detector.mark_pushed(alert)
+                                
+                                log_step("推送", f"预警推送成功 ({success_count} 个渠道)")
+                            else:
+                                log_error("推送", "预警推送失败")
+                        else:
+                            log_error("推送", "预警推送返回空结果")
+                else:
+                    logger.info("没有可用的推送器，跳过预警推送")
+            else:
+                logger.info("推送功能已禁用，跳过预警推送")
+        
+        result['success'] = True
+        return result
+        
+    except Exception as e:
+        log_error("异常检测", f"异常检测执行失败: {e}", e)
+        result['error'] = str(e)
+        return result
+
+
+def push_results_to_channels(config, analysis_result, html_path=None, current_data=None):
     """
     推送结果到各个渠道
     
@@ -217,6 +294,7 @@ def push_results_to_channels(config, analysis_result, html_path=None):
         config: 配置
         analysis_result: 分析结果
         html_path: HTML报告路径
+        current_data: 当前快照数据（用于预警检测）
         
     Returns:
         推送结果字典

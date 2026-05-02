@@ -192,6 +192,56 @@ class PushManager:
         
         return results
     
+    def push_alert(self,
+                   alerts: List[Dict[str, Any]],
+                   pusher_names: Optional[List[str]] = None) -> Dict[str, bool]:
+        """
+        推送预警消息到所有或指定的推送器
+        
+        Args:
+            alerts: 预警事件列表
+            pusher_names: 指定推送器名称列表，None 表示所有
+            
+        Returns:
+            每个推送器的推送结果字典
+        """
+        results = {}
+        
+        if not alerts:
+            logger.info("没有预警事件需要推送")
+            return results
+        
+        if pusher_names:
+            pushers = [self._pushers[name] for name in pusher_names if name in self._pushers]
+        else:
+            pushers = self.get_all_pushers()
+        
+        if not pushers:
+            logger.warning("没有可用的推送器")
+            return results
+        
+        for pusher in pushers:
+            pusher_name = type(pusher).__name__
+            try:
+                if hasattr(pusher, 'push_alert'):
+                    success = pusher.push_alert(alerts)
+                else:
+                    from anomaly_detector import AnomalyDetector
+                    detector = AnomalyDetector(self.config, None)
+                    message = detector.build_alert_message(alerts)
+                    success = pusher.push("热搜异常预警", message)
+                
+                results[pusher_name] = success
+                if success:
+                    logger.info(f"{pusher_name} 预警推送成功，共 {len(alerts)} 个事件")
+                else:
+                    logger.warning(f"{pusher_name} 预警推送失败")
+            except Exception as e:
+                logger.error(f"{pusher_name} 预警推送异常: {e}")
+                results[pusher_name] = False
+        
+        return results
+    
     def is_available(self) -> bool:
         """
         检查是否有可用的推送器

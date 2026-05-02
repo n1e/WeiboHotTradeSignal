@@ -1,0 +1,552 @@
+{% extends "web/base.html" %}
+
+{% block title %}预警配置 - 微博热搜交易信号分析器{% endblock %}
+
+{% block extra_css %}
+<style>
+    .config-section {
+        margin-bottom: 30px;
+    }
+    .config-card {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 15px;
+    }
+    .keyword-item {
+        display: inline-flex;
+        align-items: center;
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 20px;
+        padding: 5px 15px;
+        margin: 5px;
+    }
+    .keyword-included {
+        border-color: #10b981;
+        background: #ecfdf5;
+    }
+    .keyword-excluded {
+        border-color: #ef4444;
+        background: #fef2f2;
+    }
+    .form-switch.form-check-lg .form-check-input {
+        width: 3rem;
+        height: 1.5rem;
+    }
+    .save-indicator {
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    .save-indicator.show {
+        opacity: 1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-gear me-2"></i>预警总开关</span>
+                <div class="form-check form-switch form-check-lg mb-0">
+                    <input class="form-check-input" type="checkbox" id="enabled" onchange="saveConfig()">
+                    <label class="form-check-label" for="enabled">启用预警功能</label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-list-check me-2"></i>预警类型配置
+            </div>
+            <div class="card-body">
+                <div class="config-card">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h6 class="mb-1"><i class="bi bi-star text-success me-2"></i>新上榜话题</h6>
+                            <small class="text-muted">检测新进入榜单的话题，特别是快速进入前列的话题</small>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="new_topic_enabled" onchange="saveConfig()">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">触发预警的排名阈值</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" id="new_topic_top_rank_threshold" min="1" max="50" value="10" onchange="saveConfig()">
+                                <span class="input-group-text">名以内</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="config-card">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h6 class="mb-1"><i class="bi bi-arrow-up-right text-primary me-2"></i>排名暴涨</h6>
+                            <small class="text-muted">检测短时间内排名大幅提升的话题</small>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="rank_surge_enabled" checked onchange="saveConfig()">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">排名上升幅度阈值</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" id="rank_surge_threshold" min="1" max="50" value="30" onchange="saveConfig()">
+                                <span class="input-group-text">名以上</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">进入目标排名</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" id="rank_surge_target_rank" min="1" max="50" value="10" onchange="saveConfig()">
+                                <span class="input-group-text">名以内</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="config-card">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h6 class="mb-1"><i class="bi bi-fire text-danger me-2"></i>热度爆发</h6>
+                            <small class="text-muted">检测热度值短时间内大幅增长的话题</small>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="heat_surge_enabled" checked onchange="saveConfig()">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">热度增长比例阈值</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" id="heat_surge_ratio_threshold" min="1.1" max="10" step="0.1" value="2.0" onchange="saveConfig()">
+                                <span class="input-group-text">倍以上</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="config-card">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h6 class="mb-1"><i class="bi bi-x-circle text-warning me-2"></i>突然消失</h6>
+                            <small class="text-muted">检测持续在榜后突然消失的话题</small>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="sudden_disappear_enabled" checked onchange="saveConfig()">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">连续上榜天数阈值</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" id="sudden_disappear_days_threshold" min="1" max="30" value="3" onchange="saveConfig()">
+                                <span class="input-group-text">天以上</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="config-card">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h6 class="mb-1"><i class="bi bi-arrow-down-right text-secondary me-2"></i>排名暴跌</h6>
+                            <small class="text-muted">检测高排名话题短时间内大幅下滑</small>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="rank_plunge_enabled" checked onchange="saveConfig()">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">触发预警的起始排名</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" id="rank_plunge_start_rank" min="1" max="50" value="10" onchange="saveConfig()">
+                                <span class="input-group-text">名以内</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small text-muted">排名下降幅度阈值</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" id="rank_plunge_threshold" min="1" max="50" value="20" onchange="saveConfig()">
+                                <span class="input-group-text">名以上</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-bell me-2"></i>预警级别与推送配置
+            </div>
+            <div class="card-body">
+                <div class="config-card">
+                    <h6 class="mb-3"><i class="bi bi-circle-fill text-danger me-2"></i>紧急预警</h6>
+                    <div class="row align-items-center mb-2">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="alert_level_urgent_enabled" checked onchange="saveConfig()">
+                                <label class="form-check-label" for="alert_level_urgent_enabled">启用该级别预警</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">推送间隔</span>
+                                <input type="number" class="form-control" id="urgent_push_interval_minutes" min="1" max="1440" value="5" onchange="saveConfig()">
+                                <span class="input-group-text">分钟</span>
+                            </div>
+                        </div>
+                    </div>
+                    <small class="text-muted">适用于：TOP3新话题、排名暴涨超过阈值2倍、热度暴涨超过阈值2倍</small>
+                </div>
+                
+                <div class="config-card">
+                    <h6 class="mb-3"><i class="bi bi-circle-fill text-warning me-2"></i>重要预警</h6>
+                    <div class="row align-items-center mb-2">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="alert_level_important_enabled" checked onchange="saveConfig()">
+                                <label class="form-check-label" for="alert_level_important_enabled">启用该级别预警</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">推送间隔</span>
+                                <input type="number" class="form-control" id="important_push_interval_minutes" min="1" max="1440" value="30" onchange="saveConfig()">
+                                <span class="input-group-text">分钟</span>
+                            </div>
+                        </div>
+                    </div>
+                    <small class="text-muted">适用于：TOP10新话题、排名暴涨超过阈值1.5倍、热度暴涨超过阈值1.5倍</small>
+                </div>
+                
+                <div class="config-card">
+                    <h6 class="mb-3"><i class="bi bi-circle-fill text-info me-2"></i>普通预警</h6>
+                    <div class="row align-items-center mb-2">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="alert_level_normal_enabled" checked onchange="saveConfig()">
+                                <label class="form-check-label" for="alert_level_normal_enabled">启用该级别预警</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">推送间隔</span>
+                                <input type="number" class="form-control" id="normal_push_interval_minutes" min="1" max="1440" value="60" onchange="saveConfig()">
+                                <span class="input-group-text">分钟</span>
+                            </div>
+                        </div>
+                    </div>
+                    <small class="text-muted">适用于：其他一般异常情况</small>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-tags me-2"></i>关键词过滤</span>
+                <button class="btn btn-sm btn-gradient" data-bs-toggle="modal" data-bs-target="#addKeywordModal">
+                    <i class="bi bi-plus me-1"></i>添加
+                </button>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    设置关注关键词后，只推送包含这些关键词的预警；设置排除关键词后，这些关键词的预警将被忽略。
+                </p>
+                <div id="keywordList">
+                    <div class="loading-spinner">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <i class="bi bi-play-circle me-2"></i>测试推送
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">点击下方按钮发送一条测试预警消息，验证推送配置是否正确。</p>
+                <button class="btn btn-gradient" onclick="testPush()">
+                    <i class="bi bi-send me-2"></i>发送测试预警
+                </button>
+                <span class="save-indicator ms-2" id="testResult"></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addKeywordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">添加关键词</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">关键词</label>
+                    <input type="text" class="form-control" id="newKeyword" placeholder="输入关键词">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">类型</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="keywordType" id="keywordInclude" value="include" checked>
+                        <label class="form-check-label" for="keywordInclude">
+                            <span class="text-success">关注关键词</span> - 只推送包含此关键词的预警
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="keywordType" id="keywordExclude" value="exclude">
+                        <label class="form-check-label" for="keywordExclude">
+                            <span class="text-danger">排除关键词</span> - 忽略包含此关键词的预警
+                        </label>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">优先级（数字越大优先级越高）</label>
+                    <input type="number" class="form-control" id="keywordPriority" value="0" min="0" max="100">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-gradient" onclick="addKeyword()">添加</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentConfig = {};
+
+async function loadConfig() {
+    try {
+        const data = await apiCall('/api/alert-config');
+        currentConfig = data.config || {};
+        
+        const checkboxes = [
+            'enabled', 'new_topic_enabled', 'rank_surge_enabled', 
+            'heat_surge_enabled', 'sudden_disappear_enabled', 'rank_plunge_enabled',
+            'alert_level_normal_enabled', 'alert_level_important_enabled', 'alert_level_urgent_enabled'
+        ];
+        
+        checkboxes.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && currentConfig[id] !== undefined) {
+                el.checked = currentConfig[id];
+            }
+        });
+        
+        const numbers = [
+            'new_topic_top_rank_threshold', 'rank_surge_threshold', 'rank_surge_target_rank',
+            'heat_surge_ratio_threshold', 'sudden_disappear_days_threshold',
+            'rank_plunge_threshold', 'rank_plunge_start_rank',
+            'normal_push_interval_minutes', 'important_push_interval_minutes', 'urgent_push_interval_minutes'
+        ];
+        
+        numbers.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && currentConfig[id] !== undefined) {
+                el.value = currentConfig[id];
+            }
+        });
+        
+        renderKeywords(data.keywords || []);
+        
+    } catch (error) {
+        console.error('加载配置失败:', error);
+    }
+}
+
+async function saveConfig() {
+    try {
+        const configData = {};
+        
+        const checkboxes = [
+            'enabled', 'new_topic_enabled', 'rank_surge_enabled', 
+            'heat_surge_enabled', 'sudden_disappear_enabled', 'rank_plunge_enabled',
+            'alert_level_normal_enabled', 'alert_level_important_enabled', 'alert_level_urgent_enabled'
+        ];
+        
+        checkboxes.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                configData[id] = el.checked;
+            }
+        });
+        
+        const numbers = [
+            'new_topic_top_rank_threshold', 'rank_surge_threshold', 'rank_surge_target_rank',
+            'heat_surge_ratio_threshold', 'sudden_disappear_days_threshold',
+            'rank_plunge_threshold', 'rank_plunge_start_rank',
+            'normal_push_interval_minutes', 'important_push_interval_minutes', 'urgent_push_interval_minutes'
+        ];
+        
+        numbers.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                const value = parseFloat(el.value);
+                configData[id] = isNaN(value) ? currentConfig[id] : value;
+            }
+        });
+        
+        const response = await apiCall('/api/alert-config', {
+            method: 'POST',
+            body: JSON.stringify({ config: configData })
+        });
+        
+        if (response.success) {
+            currentConfig = { ...currentConfig, ...configData };
+            showSaveIndicator('保存成功', 'success');
+        } else {
+            showSaveIndicator('保存失败: ' + (response.error || '未知错误'), 'error');
+        }
+        
+    } catch (error) {
+        console.error('保存配置失败:', error);
+        showSaveIndicator('保存失败: ' + error.message, 'error');
+    }
+}
+
+function renderKeywords(keywords) {
+    const container = document.getElementById('keywordList');
+    
+    if (!keywords || keywords.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center py-3 mb-0">暂无关键词，将接收所有预警</p>';
+        return;
+    }
+    
+    let html = '';
+    keywords.forEach(kw => {
+        const badgeClass = kw.is_included ? 'keyword-included' : 'keyword-excluded';
+        const typeLabel = kw.is_included ? '关注' : '排除';
+        const typeIcon = kw.is_included ? 'bi-check-circle text-success' : 'bi-x-circle text-danger';
+        
+        html += `
+            <div class="keyword-item ${badgeClass}">
+                <i class="bi ${typeIcon} me-1"></i>
+                <span>${kw.keyword}</span>
+                <span class="badge bg-light text-muted ms-2">${typeLabel}</span>
+                <button class="btn btn-link btn-sm p-0 ms-2 text-danger" onclick="removeKeyword('${kw.keyword}')">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+async function addKeyword() {
+    const keyword = document.getElementById('newKeyword').value.trim();
+    if (!keyword) {
+        alert('请输入关键词');
+        return;
+    }
+    
+    const isIncluded = document.querySelector('input[name="keywordType"]:checked').value === 'include';
+    const priority = parseInt(document.getElementById('keywordPriority').value) || 0;
+    
+    try {
+        const response = await apiCall('/api/alert-keywords', {
+            method: 'POST',
+            body: JSON.stringify({
+                keyword: keyword,
+                is_included: isIncluded,
+                priority: priority
+            })
+        });
+        
+        if (response.success) {
+            document.getElementById('newKeyword').value = '';
+            bootstrap.Modal.getInstance(document.getElementById('addKeywordModal')).hide();
+            loadConfig();
+        } else {
+            alert('添加失败: ' + (response.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('添加关键词失败:', error);
+        alert('添加失败: ' + error.message);
+    }
+}
+
+async function removeKeyword(keyword) {
+    if (!confirm(`确定要删除关键词 "${keyword}" 吗？`)) {
+        return;
+    }
+    
+    try {
+        const response = await apiCall(`/api/alert-keywords/${encodeURIComponent(keyword)}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.success) {
+            loadConfig();
+        } else {
+            alert('删除失败: ' + (response.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('删除关键词失败:', error);
+        alert('删除失败: ' + error.message);
+    }
+}
+
+async function testPush() {
+    const resultEl = document.getElementById('testResult');
+    resultEl.className = 'save-indicator';
+    resultEl.textContent = '发送中...';
+    resultEl.classList.add('show');
+    
+    try {
+        const response = await apiCall('/api/alert-test', {
+            method: 'POST'
+        });
+        
+        if (response.success) {
+            resultEl.textContent = '✓ 测试预警已发送';
+            resultEl.className = 'save-indicator show text-success';
+        } else {
+            resultEl.textContent = '✗ ' + (response.error || '发送失败');
+            resultEl.className = 'save-indicator show text-danger';
+        }
+    } catch (error) {
+        console.error('测试推送失败:', error);
+        resultEl.textContent = '✗ 发送失败: ' + error.message;
+        resultEl.className = 'save-indicator show text-danger';
+    }
+}
+
+function showSaveIndicator(message, type) {
+    const indicator = document.createElement('span');
+    indicator.className = 'save-indicator ms-2';
+    indicator.textContent = type === 'success' ? '✓ ' + message : '✗ ' + message;
+    indicator.style.color = type === 'success' ? '#10b981' : '#ef4444';
+    indicator.classList.add('show');
+    
+    document.querySelector('.card-header').appendChild(indicator);
+    
+    setTimeout(() => {
+        indicator.remove();
+    }, 2000);
+}
+
+loadConfig();
+</script>
+{% endblock %}

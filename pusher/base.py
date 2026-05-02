@@ -6,7 +6,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 
 class BasePusher(ABC):
@@ -61,6 +61,19 @@ class BasePusher(ABC):
             title: 消息标题
             analysis_result: 分析结果
             html_path: HTML报告路径（可选）
+            
+        Returns:
+            是否推送成功
+        """
+        pass
+    
+    @abstractmethod
+    def push_alert(self, alerts: List[Dict[str, Any]]) -> bool:
+        """
+        推送预警消息
+        
+        Args:
+            alerts: 预警事件列表
             
         Returns:
             是否推送成功
