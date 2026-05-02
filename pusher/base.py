@@ -6,7 +6,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 
 class BasePusher(ABC):
