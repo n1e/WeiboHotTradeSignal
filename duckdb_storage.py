@@ -143,6 +143,68 @@ class DuckDBStorage:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_weekly_topic_summary_id ON weekly_hot_topic_items(weekly_summary_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_weekly_topic_title ON weekly_hot_topic_items(title)")
             
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_investment_analysis_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_investment_topic_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_beneficiary_stock_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_topic_hot_title_id START 1")
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS investment_topic_analyses (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_investment_analysis_id'),
+                    analysis_date DATE NOT NULL UNIQUE,
+                    analysis_summary TEXT,
+                    total_topics INTEGER NOT NULL DEFAULT 0,
+                    total_snapshot_records INTEGER NOT NULL DEFAULT 0,
+                    total_unique_topics INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS investment_topics (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_investment_topic_id'),
+                    analysis_id INTEGER NOT NULL,
+                    rank INTEGER NOT NULL,
+                    topic_name VARCHAR NOT NULL,
+                    analysis_dimension VARCHAR,
+                    confidence_level VARCHAR,
+                    core_logic TEXT,
+                    market_expectation TEXT,
+                    related_industries_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (analysis_id) REFERENCES investment_topic_analyses(id)
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS beneficiary_stocks (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_beneficiary_stock_id'),
+                    topic_id INTEGER NOT NULL,
+                    stock_name VARCHAR NOT NULL,
+                    stock_code VARCHAR,
+                    benefit_reason TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (topic_id) REFERENCES investment_topics(id)
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS topic_related_hot_titles (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_topic_hot_title_id'),
+                    topic_id INTEGER NOT NULL,
+                    hot_title VARCHAR NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (topic_id) REFERENCES investment_topics(id)
+                )
+            """)
+            
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_investment_analysis_date ON investment_topic_analyses(analysis_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_investment_topic_analysis_id ON investment_topics(analysis_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_investment_topic_name ON investment_topics(topic_name)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_beneficiary_stock_topic_id ON beneficiary_stocks(topic_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_topic_hot_title_topic_id ON topic_related_hot_titles(topic_id)")
+            
             conn.commit()
     
     def _parse_hot_value(self, hot_str: str) -> float:
@@ -1267,6 +1329,409 @@ class DuckDBStorage:
         except Exception as e:
             print(f"获取当日快照标题列表失败: {e}")
             return []
+    
+    def save_investment_topic_analysis(
+        self,
+        analysis_date: datetime,
+        analysis_result: Dict[str, Any]
+    ) -> Optional[int]:
+        """
+        保存投资题材分析结果到数据库
+        
+        Args:
+            analysis_date: 分析日期
+            analysis_result: 分析结果字典，格式如下：
+                {
+                    'analysis_summary': '整体分析摘要',
+                    'investment_topics': [
+                        {
+                            'topic_name': '题材名称',
+                            'related_industries': ['行业1', '行业2'],
+                            'core_logic': '核心投资逻辑',
+                            'potential_beneficiary_stocks': [
+                                {'stock_name': '股票名', 'stock_code': '代码', 'benefit_reason': '原因'}
+                            ],
+                            'market_expectation': '市场预期',
+                            'analysis_dimension': '分析维度',
+                            'related_hot_titles': ['相关热搜标题'],
+                            'confidence_level': '高/中/低'
+                        }
+                    ],
+                    'raw_data_summary': {
+                        'total_snapshot_records': 0,
+                        'total_unique_topics': 0
+                    }
+                }
+            
+        Returns:
+            分析记录ID，如果保存失败返回None
+        """
+        try:
+            analysis_date_only = analysis_date.date()
+            
+            with duckdb.connect(self.db_path) as conn:
+                existing = conn.execute("""
+                    SELECT id FROM investment_topic_analyses WHERE analysis_date = ?
+                """, [analysis_date_only]).fetchone()
+                
+                if existing:
+                    analysis_id = existing[0]
+                    conn.execute("""
+                        DELETE FROM topic_related_hot_titles 
+                        WHERE topic_id IN (SELECT id FROM investment_topics WHERE analysis_id = ?)
+                    """, [analysis_id])
+                    conn.execute("""
+                        DELETE FROM beneficiary_stocks 
+                        WHERE topic_id IN (SELECT id FROM investment_topics WHERE analysis_id = ?)
+                    """, [analysis_id])
+                    conn.execute("""
+                        DELETE FROM investment_topics WHERE analysis_id = ?
+                    """, [analysis_id])
+                    
+                    conn.execute("""
+                        UPDATE investment_topic_analyses 
+                        SET analysis_summary = ?, total_topics = ?, 
+                            total_snapshot_records = ?, total_unique_topics = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, [
+                        analysis_result.get('analysis_summary', ''),
+                        len(analysis_result.get('investment_topics', [])),
+                        analysis_result.get('raw_data_summary', {}).get('total_snapshot_records', 0),
+                        analysis_result.get('raw_data_summary', {}).get('total_unique_topics', 0),
+                        analysis_id
+                    ])
+                else:
+                    result = conn.execute("""
+                        INSERT INTO investment_topic_analyses 
+                        (analysis_date, analysis_summary, total_topics, 
+                         total_snapshot_records, total_unique_topics, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        RETURNING id
+                    """, [
+                        analysis_date_only,
+                        analysis_result.get('analysis_summary', ''),
+                        len(analysis_result.get('investment_topics', [])),
+                        analysis_result.get('raw_data_summary', {}).get('total_snapshot_records', 0),
+                        analysis_result.get('raw_data_summary', {}).get('total_unique_topics', 0)
+                    ]).fetchone()
+                    
+                    if not result:
+                        print("保存投资题材分析失败")
+                        return None
+                    
+                    analysis_id = result[0]
+                
+                investment_topics = analysis_result.get('investment_topics', [])
+                for rank, topic in enumerate(investment_topics, 1):
+                    related_industries_json = json.dumps(topic.get('related_industries', []), ensure_ascii=False) if topic.get('related_industries') else None
+                    
+                    topic_result = conn.execute("""
+                        INSERT INTO investment_topics 
+                        (analysis_id, rank, topic_name, analysis_dimension, confidence_level,
+                         core_logic, market_expectation, related_industries_json, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        RETURNING id
+                    """, [
+                        analysis_id,
+                        rank,
+                        topic.get('topic_name', ''),
+                        topic.get('analysis_dimension'),
+                        topic.get('confidence_level'),
+                        topic.get('core_logic'),
+                        topic.get('market_expectation'),
+                        related_industries_json
+                    ]).fetchone()
+                    
+                    if not topic_result:
+                        continue
+                    
+                    topic_id = topic_result[0]
+                    
+                    beneficiary_stocks = topic.get('potential_beneficiary_stocks', [])
+                    for stock in beneficiary_stocks:
+                        conn.execute("""
+                            INSERT INTO beneficiary_stocks 
+                            (topic_id, stock_name, stock_code, benefit_reason, created_at)
+                            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """, [
+                            topic_id,
+                            stock.get('stock_name', ''),
+                            stock.get('stock_code'),
+                            stock.get('benefit_reason') or stock.get('benefit_reason')
+                        ])
+                    
+                    related_hot_titles = topic.get('related_hot_titles', [])
+                    for hot_title in related_hot_titles:
+                        conn.execute("""
+                            INSERT INTO topic_related_hot_titles 
+                            (topic_id, hot_title, created_at)
+                            VALUES (?, ?, CURRENT_TIMESTAMP)
+                        """, [topic_id, hot_title])
+                
+                conn.commit()
+                
+                print(f"投资题材分析已保存: 日期={analysis_date_only}, 题材数={len(investment_topics)}")
+                return analysis_id
+                
+        except Exception as e:
+            print(f"保存投资题材分析失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def get_investment_topic_analysis(self, analysis_date: datetime) -> Optional[Dict[str, Any]]:
+        """
+        获取指定日期的投资题材分析结果
+        
+        Args:
+            analysis_date: 分析日期
+            
+        Returns:
+            分析结果字典，如果不存在返回None
+        """
+        try:
+            analysis_date_only = analysis_date.date()
+            
+            with duckdb.connect(self.db_path) as conn:
+                analysis = conn.execute("""
+                    SELECT id, analysis_date, analysis_summary, total_topics, 
+                           total_snapshot_records, total_unique_topics, created_at, updated_at
+                    FROM investment_topic_analyses
+                    WHERE analysis_date = ?
+                """, [analysis_date_only]).fetchone()
+                
+                if not analysis:
+                    return None
+                
+                analysis_id, date, analysis_summary, total_topics, \
+                    total_snapshot_records, total_unique_topics, created_at, updated_at = analysis
+                
+                topics = conn.execute("""
+                    SELECT id, rank, topic_name, analysis_dimension, confidence_level,
+                           core_logic, market_expectation, related_industries_json
+                    FROM investment_topics
+                    WHERE analysis_id = ?
+                    ORDER BY rank
+                """, [analysis_id]).fetchall()
+                
+                topic_list = []
+                for topic_row in topics:
+                    topic_id, rank, topic_name, analysis_dimension, confidence_level, \
+                        core_logic, market_expectation, related_industries_json = topic_row
+                    
+                    related_industries = []
+                    if related_industries_json:
+                        try:
+                            related_industries = json.loads(related_industries_json)
+                        except:
+                            pass
+                    
+                    stocks = conn.execute("""
+                        SELECT stock_name, stock_code, benefit_reason
+                        FROM beneficiary_stocks
+                        WHERE topic_id = ?
+                        ORDER BY id
+                    """, [topic_id]).fetchall()
+                    
+                    beneficiary_stocks = []
+                    for stock_row in stocks:
+                        stock_name, stock_code, benefit_reason = stock_row
+                        beneficiary_stocks.append({
+                            'stock_name': stock_name,
+                            'stock_code': stock_code,
+                            'benefit_reason': benefit_reason
+                        })
+                    
+                    hot_titles = conn.execute("""
+                        SELECT hot_title
+                        FROM topic_related_hot_titles
+                        WHERE topic_id = ?
+                        ORDER BY id
+                    """, [topic_id]).fetchall()
+                    
+                    related_hot_titles = [ht[0] for ht in hot_titles]
+                    
+                    topic_list.append({
+                        'id': topic_id,
+                        'rank': rank,
+                        'topic_name': topic_name,
+                        'analysis_dimension': analysis_dimension,
+                        'confidence_level': confidence_level,
+                        'core_logic': core_logic,
+                        'market_expectation': market_expectation,
+                        'related_industries': related_industries,
+                        'potential_beneficiary_stocks': beneficiary_stocks,
+                        'related_hot_titles': related_hot_titles
+                    })
+                
+                return {
+                    'id': analysis_id,
+                    'analysis_date': date.isoformat(),
+                    'analysis_summary': analysis_summary,
+                    'total_topics': total_topics,
+                    'total_snapshot_records': total_snapshot_records,
+                    'total_unique_topics': total_unique_topics,
+                    'topics': topic_list,
+                    'created_at': created_at.isoformat() if created_at else None,
+                    'updated_at': updated_at.isoformat() if updated_at else None
+                }
+                
+        except Exception as e:
+            print(f"获取投资题材分析失败: {e}")
+            return None
+    
+    def get_investment_topic_analyses_by_date_range(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        include_topics: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        获取日期范围内的投资题材分析列表
+        
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+            include_topics: 是否包含题材详情
+            
+        Returns:
+            分析列表
+        """
+        try:
+            start_date_only = start_date.date()
+            end_date_only = end_date.date()
+            
+            with duckdb.connect(self.db_path) as conn:
+                analyses = conn.execute("""
+                    SELECT id, analysis_date, analysis_summary, total_topics, 
+                           total_snapshot_records, total_unique_topics, created_at, updated_at
+                    FROM investment_topic_analyses
+                    WHERE analysis_date >= ? AND analysis_date <= ?
+                    ORDER BY analysis_date DESC
+                """, [start_date_only, end_date_only]).fetchall()
+                
+                result = []
+                for analysis_row in analyses:
+                    analysis_id, date, analysis_summary, total_topics, \
+                        total_snapshot_records, total_unique_topics, created_at, updated_at = analysis_row
+                    
+                    analysis_data = {
+                        'id': analysis_id,
+                        'analysis_date': date.isoformat(),
+                        'analysis_summary': analysis_summary,
+                        'total_topics': total_topics,
+                        'total_snapshot_records': total_snapshot_records,
+                        'total_unique_topics': total_unique_topics,
+                        'created_at': created_at.isoformat() if created_at else None,
+                        'updated_at': updated_at.isoformat() if updated_at else None
+                    }
+                    
+                    if include_topics:
+                        topics = conn.execute("""
+                            SELECT id, rank, topic_name, analysis_dimension, confidence_level,
+                                   core_logic, market_expectation, related_industries_json
+                            FROM investment_topics
+                            WHERE analysis_id = ?
+                            ORDER BY rank
+                        """, [analysis_id]).fetchall()
+                        
+                        topic_list = []
+                        for topic_row in topics:
+                            topic_id, rank, topic_name, analysis_dimension, confidence_level, \
+                                core_logic, market_expectation, related_industries_json = topic_row
+                            
+                            related_industries = []
+                            if related_industries_json:
+                                try:
+                                    related_industries = json.loads(related_industries_json)
+                                except:
+                                    pass
+                            
+                            stocks = conn.execute("""
+                                SELECT stock_name, stock_code, benefit_reason
+                                FROM beneficiary_stocks
+                                WHERE topic_id = ?
+                                ORDER BY id
+                            """, [topic_id]).fetchall()
+                            
+                            beneficiary_stocks = []
+                            for stock_row in stocks:
+                                stock_name, stock_code, benefit_reason = stock_row
+                                beneficiary_stocks.append({
+                                    'stock_name': stock_name,
+                                    'stock_code': stock_code,
+                                    'benefit_reason': benefit_reason
+                                })
+                            
+                            hot_titles = conn.execute("""
+                                SELECT hot_title
+                                FROM topic_related_hot_titles
+                                WHERE topic_id = ?
+                                ORDER BY id
+                            """, [topic_id]).fetchall()
+                            
+                            related_hot_titles = [ht[0] for ht in hot_titles]
+                            
+                            topic_list.append({
+                                'id': topic_id,
+                                'rank': rank,
+                                'topic_name': topic_name,
+                                'analysis_dimension': analysis_dimension,
+                                'confidence_level': confidence_level,
+                                'core_logic': core_logic,
+                                'market_expectation': market_expectation,
+                                'related_industries': related_industries,
+                                'potential_beneficiary_stocks': beneficiary_stocks,
+                                'related_hot_titles': related_hot_titles
+                            })
+                        
+                        analysis_data['topics'] = topic_list
+                    
+                    result.append(analysis_data)
+                
+                return result
+                
+        except Exception as e:
+            print(f"获取投资题材分析列表失败: {e}")
+            return []
+    
+    def clear_investment_topic_analyses(self) -> bool:
+        """
+        清空投资题材分析相关的数据表
+        
+        Returns:
+            是否成功
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM topic_related_hot_titles")
+                conn.execute("DELETE FROM beneficiary_stocks")
+                conn.execute("DELETE FROM investment_topics")
+                conn.execute("DELETE FROM investment_topic_analyses")
+                conn.commit()
+                
+                print("已清空投资题材分析相关数据表")
+                return True
+                
+        except Exception as e:
+            print(f"清空投资题材分析数据表失败: {e}")
+            return False
+    
+    def get_investment_analysis_count(self) -> int:
+        """
+        获取投资题材分析记录总数
+        
+        Returns:
+            记录数量
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                result = conn.execute("SELECT COUNT(*) FROM investment_topic_analyses").fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            print(f"获取投资题材分析数量失败: {e}")
+            return 0
 
 
 def main():

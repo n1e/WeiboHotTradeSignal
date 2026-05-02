@@ -90,6 +90,10 @@ def run_once(config, args):
         'push_results': {}
     }
     
+    global logger
+    if logger is None:
+        logger = get_logger()
+    
     try:
         logger.info("=" * 60)
         logger.info("微博热搜交易信号分析器 - 单次执行")
@@ -567,6 +571,10 @@ def run_investment_mining(config, target_date_str: str = None):
     Returns:
         执行结果
     """
+    global logger
+    if logger is None:
+        logger = get_logger()
+    
     from investment_topic_miner import InvestmentTopicMiner
     from datetime import datetime
     
