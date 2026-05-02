@@ -1,0 +1,677 @@
+{% extends "web/base.html" %}
+
+{% block title %}投资题材分析 - 微博热搜交易信号分析器{% endblock %}
+
+{% block extra_css %}
+<style>
+    .topic-card {
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 12px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        background: white;
+    }
+    
+    .topic-card:hover {
+        border-color: #667eea;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+    }
+    
+    .topic-card.selected {
+        border-color: #667eea;
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+    }
+    
+    .confidence-high {
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: white;
+    }
+    
+    .confidence-medium {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: white;
+    }
+    
+    .confidence-low {
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        color: white;
+    }
+    
+    .dimension-tag {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        margin-right: 5px;
+        margin-bottom: 5px;
+    }
+    
+    .dimension-policy {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    
+    .dimension-industry {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .dimension-company {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .dimension-event {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .dimension-consumer {
+        background: #fce7f3;
+        color: #9d174d;
+    }
+    
+    .dimension-tech {
+        background: #e0e7ff;
+        color: #4338ca;
+    }
+    
+    .dimension-other {
+        background: #f3f4f6;
+        color: #374151;
+    }
+    
+    .detail-section {
+        margin-bottom: 20px;
+        padding: 15px;
+        background: #f8fafc;
+        border-radius: 8px;
+    }
+    
+    .detail-section h6 {
+        color: #667eea;
+        margin-bottom: 10px;
+        font-weight: 600;
+    }
+    
+    .stock-card {
+        background: white;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
+        border-left: 4px solid #667eea;
+    }
+    
+    .stock-name {
+        font-weight: 600;
+        color: #1e293b;
+    }
+    
+    .stock-code {
+        font-size: 0.85rem;
+        color: #64748b;
+        margin-left: 8px;
+    }
+    
+    .hot-title-item {
+        padding: 6px 12px;
+        background: white;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        font-size: 0.9rem;
+        border-left: 3px solid #e2e8f0;
+    }
+    
+    .sidebar-container {
+        height: calc(100vh - 200px);
+        overflow-y: auto;
+        padding-right: 10px;
+    }
+    
+    .detail-container {
+        height: calc(100vh - 200px);
+        overflow-y: auto;
+        padding-left: 10px;
+    }
+    
+    .stats-row {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+    }
+    
+    .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    
+    .stat-icon {
+        font-size: 1.2rem;
+    }
+    
+    .stat-label {
+        font-size: 0.85rem;
+        color: #64748b;
+    }
+    
+    .stat-value {
+        font-weight: 600;
+        color: #1e293b;
+    }
+    
+    .empty-topic-detail {
+        text-align: center;
+        padding: 80px 20px;
+        color: #6c757d;
+    }
+    
+    .empty-topic-detail i {
+        font-size: 4rem;
+        margin-bottom: 15px;
+        color: #dee2e6;
+    }
+    
+    .analysis-summary-box {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    
+    .rank-badge-small {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        font-weight: bold;
+        font-size: 0.8rem;
+        margin-right: 8px;
+    }
+    
+    .topic-list-header {
+        position: sticky;
+        top: 0;
+        background: #f8f9fa;
+        z-index: 10;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    
+    ::-webkit-scrollbar {
+        width: 6px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 3px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #a1a1a1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-lightning-charge me-2"></i>投资题材分析专题</span>
+                <div class="d-flex align-items-center gap-3">
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="date" id="analysisDate" class="form-control form-control-sm" style="width: 140px;">
+                        <button class="btn btn-sm btn-gradient" onclick="loadAnalysis()">
+                            <i class="bi bi-search me-1"></i>查询
+                        </button>
+                    </div>
+                    <button class="btn btn-sm btn-success" onclick="runMiningTask()">
+                        <i class="bi bi-play-circle me-1"></i>执行挖掘
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="exportAnalysis()">
+                        <i class="bi bi-download me-1"></i>导出
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4" id="statsRow" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="stats-row" id="statsContainer">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-list-ul me-2"></i>题材列表
+            </div>
+            <div class="card-body p-3">
+                <div class="sidebar-container" id="topicListContainer">
+                    <div class="loading-spinner">
+                        <div class="spinner-border" role="status"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-header" id="detailHeader">
+                <i class="bi bi-file-earmark-text me-2"></i>题材详情
+            </div>
+            <div class="card-body p-3">
+                <div class="detail-container" id="topicDetailContainer">
+                    <div class="empty-topic-detail">
+                        <i class="bi bi-cursor"></i>
+                        <p class="mt-3 mb-2">请从左侧选择一个投资题材查看详情</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentAnalysis = null;
+let selectedTopicIndex = null;
+
+function initDateSelector() {
+    const today = new Date();
+    const dateInput = document.getElementById('analysisDate');
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    dateInput.value = yesterday.toISOString().split('T')[0];
+    dateInput.max = today.toISOString().split('T')[0];
+}
+
+function getDimensionClass(dimension) {
+    if (!dimension) return 'dimension-other';
+    const d = dimension.toLowerCase();
+    if (d.includes('政策') || d.includes('policy')) return 'dimension-policy';
+    if (d.includes('行业') || d.includes('industry')) return 'dimension-industry';
+    if (d.includes('公司') || d.includes('事件') || d.includes('company')) return 'dimension-company';
+    if (d.includes('突发') || d.includes('事件') || d.includes('event')) return 'dimension-event';
+    if (d.includes('消费') || d.includes('consumer')) return 'dimension-consumer';
+    if (d.includes('自主') || d.includes('技术') || d.includes('tech')) return 'dimension-tech';
+    return 'dimension-other';
+}
+
+function getConfidenceClass(confidence) {
+    if (!confidence) return 'confidence-medium';
+    const c = confidence.toLowerCase();
+    if (c === '高' || c === 'high') return 'confidence-high';
+    if (c === '低' || c === 'low') return 'confidence-low';
+    return 'confidence-medium';
+}
+
+function getConfidenceText(confidence) {
+    if (!confidence) return '中';
+    return confidence;
+}
+
+async function loadAnalysis() {
+    const container = document.getElementById('topicListContainer');
+    const date = document.getElementById('analysisDate').value;
+    
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
+    
+    try {
+        const data = await apiCall(`/api/investment-topic?date=${date}`);
+        currentAnalysis = data;
+        selectedTopicIndex = null;
+        
+        if (!data.exists || !data.topics || data.topics.length === 0) {
+            renderEmptyAnalysis(data.date);
+            document.getElementById('statsRow').style.display = 'none';
+            document.getElementById('topicDetailContainer').innerHTML = `
+                <div class="empty-topic-detail">
+                    <i class="bi bi-journal-x" style="font-size: 3rem; opacity: 0.3;"></i>
+                    <p class="mt-3 mb-2">暂无 ${data.date} 的投资题材分析</p>
+                    <p class="text-muted small mb-0">请点击上方"执行挖掘"按钮生成</p>
+                </div>
+            `;
+            return;
+        }
+        
+        renderStats(data);
+        renderTopicList(data.topics);
+        document.getElementById('statsRow').style.display = 'block';
+        
+        document.getElementById('topicDetailContainer').innerHTML = `
+            <div class="empty-topic-detail">
+                <i class="bi bi-cursor"></i>
+                <p class="mt-3 mb-2">请从左侧选择一个投资题材查看详情</p>
+            </div>
+        `;
+        
+    } catch (error) {
+        console.error('加载投资题材分析失败:', error);
+        container.innerHTML = '<div class="text-center text-danger py-4">加载数据失败</div>';
+    }
+}
+
+function renderEmptyAnalysis(date) {
+    const container = document.getElementById('topicListContainer');
+    container.innerHTML = `
+        <div class="empty-summary">
+            <i class="bi bi-journal-x" style="font-size: 3rem; opacity: 0.3;"></i>
+            <p class="mt-3 mb-2">暂无 ${date} 的投资题材分析</p>
+            <p class="text-muted small mb-0">请点击上方"执行挖掘"按钮生成</p>
+        </div>
+    `;
+}
+
+function renderStats(data) {
+    const statsContainer = document.getElementById('statsContainer');
+    
+    const highCount = data.topics.filter(t => t.confidence_level === '高' || t.confidence_level === 'high').length;
+    const mediumCount = data.topics.filter(t => t.confidence_level === '中' || !t.confidence_level || t.confidence_level === 'medium').length;
+    const lowCount = data.topics.filter(t => t.confidence_level === '低' || t.confidence_level === 'low').length;
+    
+    let totalStocks = 0;
+    data.topics.forEach(topic => {
+        totalStocks += (topic.potential_beneficiary_stocks || []).length;
+    });
+    
+    statsContainer.innerHTML = `
+        <div class="stat-item">
+            <i class="bi bi-calendar3 stat-icon text-primary"></i>
+            <div>
+                <div class="stat-label">分析日期</div>
+                <div class="stat-value">${data.date}</div>
+            </div>
+        </div>
+        <div class="stat-item">
+            <i class="bi bi-lightning stat-icon text-success"></i>
+            <div>
+                <div class="stat-label">题材总数</div>
+                <div class="stat-value">${data.total_topics || data.topics.length} 个</div>
+            </div>
+        </div>
+        <div class="stat-item">
+            <i class="bi bi-graph-up-arrow stat-icon text-info"></i>
+            <div>
+                <div class="stat-label">高信心</div>
+                <div class="stat-value text-success">${highCount} 个</div>
+            </div>
+        </div>
+        <div class="stat-item">
+            <i class="bi bi-graph-down-arrow stat-icon text-warning"></i>
+            <div>
+                <div class="stat-label">中信心</div>
+                <div class="stat-value text-warning">${mediumCount} 个</div>
+            </div>
+        </div>
+        <div class="stat-item">
+            <i class="bi bi-exclamation-triangle stat-icon text-danger"></i>
+            <div>
+                <div class="stat-label">低信心</div>
+                <div class="stat-value text-danger">${lowCount} 个</div>
+            </div>
+        </div>
+        <div class="stat-item">
+            <i class="bi bi-building stat-icon text-secondary"></i>
+            <div>
+                <div class="stat-label">受益标的</div>
+                <div class="stat-value">${totalStocks} 只</div>
+            </div>
+        </div>
+    `;
+}
+
+function renderTopicList(topics) {
+    const container = document.getElementById('topicListContainer');
+    
+    if (!topics || topics.length === 0) {
+        container.innerHTML = `
+            <div class="empty-summary">
+                <i class="bi bi-journal-x" style="font-size: 3rem; opacity: 0.3;"></i>
+                <p class="mt-3 mb-2">暂无投资题材数据</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '<div class="topic-list-header mb-3">';
+    html += `<small class="text-muted">共 ${topics.length} 个投资题材，点击卡片查看详情</small>';
+    html += '</div>';
+    
+    topics.forEach((topic, index) => {
+        const confidenceClass = getConfidenceClass(topic.confidence_level);
+        const dimensionClass = getDimensionClass(topic.analysis_dimension);
+        
+        html += `
+            <div class="topic-card" data-index="${index}" onclick="selectTopic(${index})">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div class="d-flex align-items-center">
+                        <span class="rank-badge-small ${topic.rank <= 3 ? 'rank-top-3' : 'rank-other'}">${topic.rank}</span>
+                        <strong style="font-size: 1rem;">${topic.topic_name}</strong>
+                    </div>
+                    <span class="dimension-tag ${confidenceClass}" style="font-size: 0.7rem; padding: 2px 8px;">
+                        ${getConfidenceText(topic.confidence_level)}
+                    </span>
+                </div>
+                <div class="mb-2">
+                    ${topic.analysis_dimension ? `<span class="dimension-tag ${dimensionClass}">${topic.analysis_dimension}</span>` : ''}
+                </div>
+                ${topic.related_industries && topic.related_industries.length > 0 ? `
+                    <div class="mb-2">
+                        <small class="text-muted">相关行业：</small>
+                        ${topic.related_industries.slice(0, 3).map(ind => `<span class="industry-tag">${ind}</span>`).join('')}
+                        ${topic.related_industries.length > 3 ? `<span class="text-muted small">+${topic.related_industries.length - 3}...</span>` : ''}
+                    </div>
+                ` : ''}
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted">
+                        <i class="bi bi-building me-1"></i>
+                        ${(topic.potential_beneficiary_stocks || []).length} 只标的
+                    </small>
+                    <small class="text-muted">
+                        <i class="bi bi-newspaper me-1"></i>
+                        ${(topic.related_hot_titles || []).length} 条热搜
+                    </small>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function selectTopic(index) {
+    if (!currentAnalysis || !currentAnalysis.topics) return;
+    
+    selectedTopicIndex = index;
+    const topic = currentAnalysis.topics[index];
+    
+    document.querySelectorAll('.topic-card').forEach((card, i) => {
+        if (i === index) {
+            card.classList.add('selected');
+        } else {
+            card.classList.remove('selected');
+        }
+    });
+    
+    renderTopicDetail(topic);
+}
+
+function renderTopicDetail(topic) {
+    const container = document.getElementById('topicDetailContainer');
+    const header = document.getElementById('detailHeader');
+    
+    header.innerHTML = `
+        <i class="bi bi-file-earmark-text me-2"></i>
+        <strong>${topic.topic_name}</strong>
+        <span class="dimension-tag ${getConfidenceClass(topic.confidence_level)} ms-2" style="font-size: 0.75rem;">
+            ${getConfidenceText(topic.confidence_level)}信心
+        </span>
+        ${topic.analysis_dimension ? `<span class="dimension-tag ${getDimensionClass(topic.analysis_dimension)} ms-2" style="font-size: 0.75rem;">${topic.analysis_dimension}</span>` : ''}
+    `;
+    
+    let html = '';
+    
+    if (currentAnalysis && currentAnalysis.analysis_summary) {
+        html += `
+            <div class="analysis-summary-box">
+                <h6><i class="bi bi-chat-left-text me-2"></i>当日整体分析</h6>
+                <p class="mb-0">${currentAnalysis.analysis_summary}</p>
+            </div>
+        `;
+    }
+    
+    if (topic.core_logic) {
+        html += `
+            <div class="detail-section">
+                <h6><i class="bi bi-lightbulb me-2"></i>核心投资逻辑</h6>
+                <p class="mb-0">${topic.core_logic}</p>
+            </div>
+        `;
+    }
+    
+    if (topic.related_industries && topic.related_industries.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h6><i class="bi bi-diagram-3 me-2"></i>相关行业</h6>
+                <div class="mb-0">
+                    ${topic.related_industries.map(ind => `<span class="industry-tag" style="font-size: 0.9rem; padding: 6px 14px;">${ind}</span>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    if (topic.potential_beneficiary_stocks && topic.potential_beneficiary_stocks.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h6><i class="bi bi-graph-up-arrow me-2"></i>潜在受益标的</h6>
+                ${topic.potential_beneficiary_stocks.map(stock => `
+                    <div class="stock-card">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <span class="stock-name">${stock.stock_name}</span>
+                            ${stock.stock_code ? `<span class="stock-code">(${stock.stock_code})</span>` : ''}
+                        </div>
+                    </div>
+                    ${stock.benefit_reason ? `<p class="mb-0 text-muted small">${stock.benefit_reason}</p>` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    
+    if (topic.market_expectation) {
+        html += `
+            <div class="detail-section">
+                <h6><i class="bi bi-crystal-ball me-2"></i>市场预期</h6>
+                <p class="mb-0">${topic.market_expectation}</p>
+            </div>
+        `;
+    }
+    
+    if (topic.related_hot_titles && topic.related_hot_titles.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h6><i class="bi bi-newspaper me-2"></i>相关热搜支撑</h6>
+                <div class="mb-0">
+                    ${topic.related_hot_titles.map(title => `
+                        <div class="hot-title-item">
+                            <i class="bi bi-fire text-danger me-2"></i>${title}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html || `
+        <div class="empty-topic-detail">
+            <i class="bi bi-journal-x" style="font-size: 3rem; opacity: 0.3;"></i>
+            <p class="mt-3 mb-2">该题材暂无详细信息</p>
+        </div>
+    `;
+}
+
+async function runMiningTask() {
+    const date = document.getElementById('analysisDate').value;
+    
+    if (!confirm(`确定要执行 ${date} 的投资题材挖掘任务吗？这可能需要一些时间。`)) {
+        return;
+    }
+    
+    try {
+        const result = await apiCall('/api/task/run', {
+            method: 'POST',
+            body: JSON.stringify({ 
+                type: 'investment_mining',
+                date: date
+            })
+        });
+        
+        if (result.success) {
+            alert('投资题材挖掘任务执行成功！');
+            loadAnalysis();
+        } else {
+            alert('投资题材挖掘任务执行失败: ' + (result.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('执行任务失败:', error);
+        alert('执行任务失败: ' + error.message);
+    }
+}
+
+async function exportAnalysis() {
+    const date = document.getElementById('analysisDate').value;
+    
+    try {
+        const data = await apiCall(`/api/investment-topic/export?date=${date}&format=json`);
+        
+        if (data.success) {
+            const blob = new Blob([JSON.stringify(data.data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `investment_topics_${date}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } else {
+            alert('导出失败: ' + (data.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('导出失败:', error);
+        alert('导出失败: ' + error.message);
+    }
+}
+
+initDateSelector();
+loadAnalysis();
+</script>
+{% endblock %}

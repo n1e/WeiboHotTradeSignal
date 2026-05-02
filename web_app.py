@@ -224,6 +224,53 @@ def run_weekly_summary_task():
             task_running = False
 
 
+def run_investment_mining_task(target_date_str: str = None):
+    """执行投资题材挖掘任务"""
+    global task_running
+    
+    with task_lock:
+        if task_running:
+            return {'success': False, 'error': '任务正在执行中'}
+        task_running = True
+    
+    try:
+        from main import run_investment_mining
+        result = run_investment_mining(config, target_date_str)
+        
+        topics_count = 0
+        if result and result.get('analysis_result'):
+            topics_count = len(result.get('analysis_result', {}).get('investment_topics', []))
+        
+        add_task_history('investment_mining', {
+            'run_id': f'investment_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
+            'start_time': datetime.now().isoformat(),
+            'end_time': datetime.now().isoformat(),
+            'duration_seconds': 0,
+            'success': result is not None,
+            'details': {
+                'topics_count': topics_count,
+                'save_success': result.get('save_success', False) if result else False,
+                'push_success': result.get('push_success', False) if result else False
+            }
+        })
+        
+        return {'success': result is not None, 'result': result}
+        
+    except Exception as e:
+        add_task_history('investment_mining', {
+            'run_id': f'investment_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
+            'start_time': datetime.now().isoformat(),
+            'end_time': datetime.now().isoformat(),
+            'duration_seconds': 0,
+            'success': False,
+            'details': {'error': str(e)}
+        })
+        return {'success': False, 'error': str(e)}
+    finally:
+        with task_lock:
+            task_running = False
+
+
 @app.route('/')
 def index():
     """首页"""
@@ -252,6 +299,12 @@ def summary():
 def tasks():
     """任务管理页面"""
     return render_template('web/tasks.html')
+
+
+@app.route('/investment-topics')
+def investment_topics():
+    """投资题材分析页面"""
+    return render_template('web/investment_topics.html')
 
 
 @app.route('/api/latest')
@@ -643,6 +696,7 @@ def api_weekly_summaries():
 def api_run_task():
     """执行任务"""
     task_type = request.json.get('type', 'full')
+    target_date = request.json.get('date')
     
     if task_type == 'full':
         result = run_full_task()
@@ -650,6 +704,8 @@ def api_run_task():
         result = run_daily_summary_task()
     elif task_type == 'weekly_summary':
         result = run_weekly_summary_task()
+    elif task_type == 'investment_mining':
+        result = run_investment_mining_task(target_date)
     else:
         return jsonify({'error': '无效的任务类型'}), 400
     
@@ -666,6 +722,128 @@ def api_task_status():
         'running': is_running,
         'history': task_history[:20]
     })
+
+
+@app.route('/api/investment-topic')
+def api_investment_topic():
+    """获取单日投资题材分析"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    date_str = request.args.get('date')
+    
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': '无效的日期格式'}), 400
+    else:
+        target_date = datetime.now()
+    
+    analysis = storage.get_investment_topic_analysis(target_date)
+    
+    if not analysis:
+        return jsonify({
+            'date': target_date.strftime('%Y-%m-%d'),
+            'exists': False,
+            'topics': []
+        })
+    
+    return jsonify({
+        'date': analysis.get('analysis_date'),
+        'exists': True,
+        'analysis_summary': analysis.get('analysis_summary'),
+        'total_topics': analysis.get('total_topics'),
+        'total_snapshot_records': analysis.get('total_snapshot_records'),
+        'total_unique_topics': analysis.get('total_unique_topics'),
+        'topics': analysis.get('topics', []),
+        'created_at': analysis.get('created_at'),
+        'updated_at': analysis.get('updated_at')
+    })
+
+
+@app.route('/api/investment-topics')
+def api_investment_topics():
+    """获取日期范围内的投资题材分析列表"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    days = request.args.get('days', 7)
+    include_topics = request.args.get('include_topics', 'true').lower() == 'true'
+    
+    try:
+        days = int(days)
+    except:
+        days = 7
+    
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': '无效的日期格式'}), 400
+    else:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days - 1)
+    
+    start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    try:
+        analyses = storage.get_investment_topic_analyses_by_date_range(
+            start_date, end_date, include_topics=include_topics
+        )
+        
+        return jsonify({
+            'start_date': start_date.strftime('%Y-%m-%d'),
+            'end_date': end_date.strftime('%Y-%m-%d'),
+            'count': len(analyses),
+            'analyses': analyses
+        })
+        
+    except Exception as e:
+        print(f"获取投资题材分析列表失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/investment-topic/export')
+def api_export_investment_topic():
+    """导出投资题材分析报告"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    date_str = request.args.get('date')
+    export_format = request.args.get('format', 'json')
+    
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': '无效的日期格式'}), 400
+    else:
+        target_date = datetime.now()
+    
+    analysis = storage.get_investment_topic_analysis(target_date)
+    
+    if not analysis:
+        return jsonify({
+            'success': False,
+            'error': f'没有找到 {target_date.strftime("%Y-%m-%d")} 的投资题材分析'
+        })
+    
+    if export_format == 'json':
+        return jsonify({
+            'success': True,
+            'format': 'json',
+            'data': analysis
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': '不支持的导出格式，仅支持 json 格式'
+        })
 
 
 @app.route('/api/snapshots')

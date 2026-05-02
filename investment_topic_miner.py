@@ -415,6 +415,14 @@ class InvestmentTopicMiner:
             logger.warning("投资题材挖掘失败")
             return None
         
+        log_step("数据持久化", "保存投资题材分析结果到数据库...")
+        save_success = self.storage.save_investment_topic_analysis(target_date, analysis_result)
+        
+        if save_success:
+            logger.info("投资题材分析结果已保存到数据库")
+        else:
+            logger.warning("投资题材分析结果保存失败")
+        
         push_success = self.push_to_feishu(analysis_result)
         
         if push_success:
@@ -431,5 +439,6 @@ class InvestmentTopicMiner:
             'success': True,
             'target_date': target_date.strftime('%Y-%m-%d'),
             'analysis_result': analysis_result,
+            'save_success': save_success is not None,
             'push_success': push_success
         }
