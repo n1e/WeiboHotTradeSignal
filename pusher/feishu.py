@@ -414,3 +414,87 @@ class FeishuPusher(BasePusher):
                 success = False
         
         return success
+    
+    def _build_alert_card_content(self, alerts: List[Dict[str, Any]]) -> str:
+        """
+        构建预警消息卡片内容
+        
+        Args:
+            alerts: 预警事件列表
+            
+        Returns:
+            富文本消息内容
+        """
+        from anomaly_detector import ALERT_TYPE_NAMES, ALERT_LEVEL_NAMES
+        
+        lines = []
+        lines.append("🚨 **热搜异常预警**")
+        lines.append(f"检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"共检测到 {len(alerts)} 个异常事件")
+        lines.append("")
+        
+        level_icons = {
+            'urgent': '🔴',
+            'important': '🟡',
+            'normal': '⚪'
+        }
+        
+        for alert in alerts:
+            alert_type = alert.get('alert_type', '')
+            alert_level = alert.get('alert_level', '')
+            type_name = ALERT_TYPE_NAMES.get(alert_type, alert_type)
+            level_name = ALERT_LEVEL_NAMES.get(alert_level, alert_level)
+            icon = level_icons.get(alert_level, '⚪')
+            
+            lines.append(f"{icon} **[{level_name}] {type_name}**")
+            lines.append(f"   话题: {alert.get('title', '')}")
+            
+            details = alert.get('details', '')
+            if details:
+                lines.append(f"   详情: {details}")
+            
+            rank_before = alert.get('rank_before')
+            rank_after = alert.get('rank_after')
+            if rank_before and rank_after:
+                lines.append(f"   排名变化: {rank_before} → {rank_after}")
+            
+            heat_change = alert.get('heat_change_ratio')
+            if heat_change:
+                lines.append(f"   热度变化: {(heat_change-1)*100:.1f}%")
+            
+            lines.append("")
+        
+        lines.append("=" * 40)
+        lines.append("⚠️ 免责声明：本预警仅供参考，不构成任何投资建议。")
+        lines.append("   股市有风险，投资需谨慎。")
+        
+        return "\n".join(lines)
+    
+    def push_alert(self, alerts: List[Dict[str, Any]]) -> bool:
+        """
+        推送预警消息
+        
+        Args:
+            alerts: 预警事件列表
+            
+        Returns:
+            是否推送成功
+        """
+        if not self.enabled:
+            logger.info("飞书推送已禁用，跳过")
+            return False
+        
+        if not self.app_id or not self.app_secret or not self.chat_id:
+            logger.warning("飞书配置不完整，无法推送")
+            return False
+        
+        if not alerts:
+            logger.info("没有预警事件需要推送")
+            return True
+        
+        from datetime import datetime
+        
+        content = self._build_alert_card_content(alerts)
+        title = f"热搜异常预警 ({len(alerts)}个事件)"
+        
+        return self._send_text_message(title, content)

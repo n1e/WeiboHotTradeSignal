@@ -66,3 +66,16 @@ class BasePusher(ABC):
             是否推送成功
         """
         pass
+    
+    @abstractmethod
+    def push_alert(self, alerts: List[Dict[str, Any]]) -> bool:
+        """
+        推送预警消息
+        
+        Args:
+            alerts: 预警事件列表
+            
+        Returns:
+            是否推送成功
+        """
+        pass

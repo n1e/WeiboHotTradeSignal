@@ -205,6 +205,82 @@ class DuckDBStorage:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_beneficiary_stock_topic_id ON beneficiary_stocks(topic_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_topic_hot_title_topic_id ON topic_related_hot_titles(topic_id)")
             
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_alert_config_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_alert_keyword_id START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_alert_event_id START 1")
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS alert_configs (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_alert_config_id'),
+                    config_name VARCHAR NOT NULL DEFAULT 'default',
+                    enabled BOOLEAN DEFAULT TRUE,
+                    new_topic_enabled BOOLEAN DEFAULT TRUE,
+                    new_topic_top_rank_threshold INTEGER DEFAULT 10,
+                    rank_surge_enabled BOOLEAN DEFAULT TRUE,
+                    rank_surge_threshold INTEGER DEFAULT 30,
+                    rank_surge_target_rank INTEGER DEFAULT 10,
+                    heat_surge_enabled BOOLEAN DEFAULT TRUE,
+                    heat_surge_ratio_threshold DOUBLE DEFAULT 2.0,
+                    sudden_disappear_enabled BOOLEAN DEFAULT TRUE,
+                    sudden_disappear_days_threshold INTEGER DEFAULT 3,
+                    rank_plunge_enabled BOOLEAN DEFAULT TRUE,
+                    rank_plunge_threshold INTEGER DEFAULT 20,
+                    rank_plunge_start_rank INTEGER DEFAULT 10,
+                    alert_level_normal_enabled BOOLEAN DEFAULT TRUE,
+                    alert_level_important_enabled BOOLEAN DEFAULT TRUE,
+                    alert_level_urgent_enabled BOOLEAN DEFAULT TRUE,
+                    normal_push_interval_minutes INTEGER DEFAULT 60,
+                    important_push_interval_minutes INTEGER DEFAULT 30,
+                    urgent_push_interval_minutes INTEGER DEFAULT 5,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS alert_keywords (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_alert_keyword_id'),
+                    keyword VARCHAR NOT NULL UNIQUE,
+                    is_included BOOLEAN DEFAULT TRUE,
+                    priority INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS alert_events (
+                    id INTEGER PRIMARY KEY DEFAULT nextval('seq_alert_event_id'),
+                    alert_type VARCHAR NOT NULL,
+                    alert_level VARCHAR NOT NULL DEFAULT 'normal',
+                    title VARCHAR NOT NULL,
+                    rank_before INTEGER,
+                    rank_after INTEGER,
+                    rank_change INTEGER,
+                    hot_value_before DOUBLE,
+                    hot_value_after DOUBLE,
+                    heat_change_ratio DOUBLE,
+                    snapshot_time_before TIMESTAMP,
+                    snapshot_time_after TIMESTAMP,
+                    details TEXT,
+                    is_pushed BOOLEAN DEFAULT FALSE,
+                    pushed_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_config_name ON alert_configs(config_name)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_keyword ON alert_keywords(keyword)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_event_type ON alert_events(alert_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_event_level ON alert_events(alert_level)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_event_time ON alert_events(created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_event_title ON alert_events(title)")
+            
+            conn.execute("""
+                INSERT INTO alert_configs (config_name)
+                SELECT 'default'
+                WHERE NOT EXISTS (SELECT 1 FROM alert_configs WHERE config_name = 'default')
+            """)
+            
             conn.commit()
     
     def _parse_hot_value(self, hot_str: str) -> float:
@@ -1731,6 +1807,668 @@ class DuckDBStorage:
                 return result[0] if result else 0
         except Exception as e:
             print(f"获取投资题材分析数量失败: {e}")
+            return 0
+    
+    def get_alert_config(self, config_name: str = 'default') -> Optional[Dict[str, Any]]:
+        """
+        获取预警配置
+        
+        Args:
+            config_name: 配置名称，默认为 'default'
+            
+        Returns:
+            配置字典，如果不存在返回None
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                config = conn.execute("""
+                    SELECT id, config_name, enabled,
+                           new_topic_enabled, new_topic_top_rank_threshold,
+                           rank_surge_enabled, rank_surge_threshold, rank_surge_target_rank,
+                           heat_surge_enabled, heat_surge_ratio_threshold,
+                           sudden_disappear_enabled, sudden_disappear_days_threshold,
+                           rank_plunge_enabled, rank_plunge_threshold, rank_plunge_start_rank,
+                           alert_level_normal_enabled, alert_level_important_enabled, alert_level_urgent_enabled,
+                           normal_push_interval_minutes, important_push_interval_minutes, urgent_push_interval_minutes,
+                           created_at, updated_at
+                    FROM alert_configs
+                    WHERE config_name = ?
+                    LIMIT 1
+                """, [config_name]).fetchone()
+                
+                if not config:
+                    return None
+                
+                (id, config_name, enabled,
+                 new_topic_enabled, new_topic_top_rank_threshold,
+                 rank_surge_enabled, rank_surge_threshold, rank_surge_target_rank,
+                 heat_surge_enabled, heat_surge_ratio_threshold,
+                 sudden_disappear_enabled, sudden_disappear_days_threshold,
+                 rank_plunge_enabled, rank_plunge_threshold, rank_plunge_start_rank,
+                 alert_level_normal_enabled, alert_level_important_enabled, alert_level_urgent_enabled,
+                 normal_push_interval_minutes, important_push_interval_minutes, urgent_push_interval_minutes,
+                 created_at, updated_at) = config
+                
+                return {
+                    'id': id,
+                    'config_name': config_name,
+                    'enabled': enabled,
+                    'new_topic_enabled': new_topic_enabled,
+                    'new_topic_top_rank_threshold': new_topic_top_rank_threshold,
+                    'rank_surge_enabled': rank_surge_enabled,
+                    'rank_surge_threshold': rank_surge_threshold,
+                    'rank_surge_target_rank': rank_surge_target_rank,
+                    'heat_surge_enabled': heat_surge_enabled,
+                    'heat_surge_ratio_threshold': heat_surge_ratio_threshold,
+                    'sudden_disappear_enabled': sudden_disappear_enabled,
+                    'sudden_disappear_days_threshold': sudden_disappear_days_threshold,
+                    'rank_plunge_enabled': rank_plunge_enabled,
+                    'rank_plunge_threshold': rank_plunge_threshold,
+                    'rank_plunge_start_rank': rank_plunge_start_rank,
+                    'alert_level_normal_enabled': alert_level_normal_enabled,
+                    'alert_level_important_enabled': alert_level_important_enabled,
+                    'alert_level_urgent_enabled': alert_level_urgent_enabled,
+                    'normal_push_interval_minutes': normal_push_interval_minutes,
+                    'important_push_interval_minutes': important_push_interval_minutes,
+                    'urgent_push_interval_minutes': urgent_push_interval_minutes,
+                    'created_at': created_at.isoformat() if created_at else None,
+                    'updated_at': updated_at.isoformat() if updated_at else None
+                }
+        except Exception as e:
+            print(f"获取预警配置失败: {e}")
+            return None
+    
+    def save_alert_config(self, config_data: Dict[str, Any], config_name: str = 'default') -> bool:
+        """
+        保存预警配置
+        
+        Args:
+            config_data: 配置字典
+            config_name: 配置名称
+            
+        Returns:
+            是否保存成功
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                existing = conn.execute("""
+                    SELECT id FROM alert_configs WHERE config_name = ?
+                """, [config_name]).fetchone()
+                
+                if existing:
+                    config_id = existing[0]
+                    conn.execute("""
+                        UPDATE alert_configs SET
+                            enabled = ?,
+                            new_topic_enabled = ?,
+                            new_topic_top_rank_threshold = ?,
+                            rank_surge_enabled = ?,
+                            rank_surge_threshold = ?,
+                            rank_surge_target_rank = ?,
+                            heat_surge_enabled = ?,
+                            heat_surge_ratio_threshold = ?,
+                            sudden_disappear_enabled = ?,
+                            sudden_disappear_days_threshold = ?,
+                            rank_plunge_enabled = ?,
+                            rank_plunge_threshold = ?,
+                            rank_plunge_start_rank = ?,
+                            alert_level_normal_enabled = ?,
+                            alert_level_important_enabled = ?,
+                            alert_level_urgent_enabled = ?,
+                            normal_push_interval_minutes = ?,
+                            important_push_interval_minutes = ?,
+                            urgent_push_interval_minutes = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, [
+                        config_data.get('enabled', True),
+                        config_data.get('new_topic_enabled', True),
+                        config_data.get('new_topic_top_rank_threshold', 10),
+                        config_data.get('rank_surge_enabled', True),
+                        config_data.get('rank_surge_threshold', 30),
+                        config_data.get('rank_surge_target_rank', 10),
+                        config_data.get('heat_surge_enabled', True),
+                        config_data.get('heat_surge_ratio_threshold', 2.0),
+                        config_data.get('sudden_disappear_enabled', True),
+                        config_data.get('sudden_disappear_days_threshold', 3),
+                        config_data.get('rank_plunge_enabled', True),
+                        config_data.get('rank_plunge_threshold', 20),
+                        config_data.get('rank_plunge_start_rank', 10),
+                        config_data.get('alert_level_normal_enabled', True),
+                        config_data.get('alert_level_important_enabled', True),
+                        config_data.get('alert_level_urgent_enabled', True),
+                        config_data.get('normal_push_interval_minutes', 60),
+                        config_data.get('important_push_interval_minutes', 30),
+                        config_data.get('urgent_push_interval_minutes', 5),
+                        config_id
+                    ])
+                else:
+                    conn.execute("""
+                        INSERT INTO alert_configs (
+                            config_name, enabled,
+                            new_topic_enabled, new_topic_top_rank_threshold,
+                            rank_surge_enabled, rank_surge_threshold, rank_surge_target_rank,
+                            heat_surge_enabled, heat_surge_ratio_threshold,
+                            sudden_disappear_enabled, sudden_disappear_days_threshold,
+                            rank_plunge_enabled, rank_plunge_threshold, rank_plunge_start_rank,
+                            alert_level_normal_enabled, alert_level_important_enabled, alert_level_urgent_enabled,
+                            normal_push_interval_minutes, important_push_interval_minutes, urgent_push_interval_minutes
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        config_name,
+                        config_data.get('enabled', True),
+                        config_data.get('new_topic_enabled', True),
+                        config_data.get('new_topic_top_rank_threshold', 10),
+                        config_data.get('rank_surge_enabled', True),
+                        config_data.get('rank_surge_threshold', 30),
+                        config_data.get('rank_surge_target_rank', 10),
+                        config_data.get('heat_surge_enabled', True),
+                        config_data.get('heat_surge_ratio_threshold', 2.0),
+                        config_data.get('sudden_disappear_enabled', True),
+                        config_data.get('sudden_disappear_days_threshold', 3),
+                        config_data.get('rank_plunge_enabled', True),
+                        config_data.get('rank_plunge_threshold', 20),
+                        config_data.get('rank_plunge_start_rank', 10),
+                        config_data.get('alert_level_normal_enabled', True),
+                        config_data.get('alert_level_important_enabled', True),
+                        config_data.get('alert_level_urgent_enabled', True),
+                        config_data.get('normal_push_interval_minutes', 60),
+                        config_data.get('important_push_interval_minutes', 30),
+                        config_data.get('urgent_push_interval_minutes', 5)
+                    ])
+                
+                conn.commit()
+                print(f"预警配置已保存: {config_name}")
+                return True
+        except Exception as e:
+            print(f"保存预警配置失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def get_alert_keywords(self) -> List[Dict[str, Any]]:
+        """
+        获取所有关注关键词
+        
+        Returns:
+            关键词列表
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                keywords = conn.execute("""
+                    SELECT id, keyword, is_included, priority, created_at
+                    FROM alert_keywords
+                    ORDER BY priority DESC, created_at DESC
+                """).fetchall()
+                
+                result = []
+                for row in keywords:
+                    id, keyword, is_included, priority, created_at = row
+                    result.append({
+                        'id': id,
+                        'keyword': keyword,
+                        'is_included': is_included,
+                        'priority': priority,
+                        'created_at': created_at.isoformat() if created_at else None
+                    })
+                
+                return result
+        except Exception as e:
+            print(f"获取关注关键词失败: {e}")
+            return []
+    
+    def add_alert_keyword(self, keyword: str, is_included: bool = True, priority: int = 0) -> Optional[int]:
+        """
+        添加关注关键词
+        
+        Args:
+            keyword: 关键词
+            is_included: 是否包含（True=关注，False=排除）
+            priority: 优先级
+            
+        Returns:
+            关键词ID，失败返回None
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                existing = conn.execute("""
+                    SELECT id FROM alert_keywords WHERE keyword = ?
+                """, [keyword]).fetchone()
+                
+                if existing:
+                    conn.execute("""
+                        UPDATE alert_keywords SET
+                            is_included = ?,
+                            priority = ?
+                        WHERE keyword = ?
+                    """, [is_included, priority, keyword])
+                    conn.commit()
+                    return existing[0]
+                
+                result = conn.execute("""
+                    INSERT INTO alert_keywords (keyword, is_included, priority, created_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    RETURNING id
+                """, [keyword, is_included, priority]).fetchone()
+                
+                conn.commit()
+                
+                if result:
+                    print(f"已添加关注关键词: {keyword}")
+                    return result[0]
+                return None
+        except Exception as e:
+            print(f"添加关注关键词失败: {e}")
+            return None
+    
+    def remove_alert_keyword(self, keyword: str) -> bool:
+        """
+        删除关注关键词
+        
+        Args:
+            keyword: 关键词
+            
+        Returns:
+            是否删除成功
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("""
+                    DELETE FROM alert_keywords WHERE keyword = ?
+                """, [keyword])
+                conn.commit()
+                print(f"已删除关注关键词: {keyword}")
+                return True
+        except Exception as e:
+            print(f"删除关注关键词失败: {e}")
+            return False
+    
+    def save_alert_event(self, event_data: Dict[str, Any]) -> Optional[int]:
+        """
+        保存预警事件
+        
+        Args:
+            event_data: 事件数据字典，包含:
+                - alert_type: 预警类型 (new_topic, rank_surge, heat_surge, sudden_disappear, rank_plunge)
+                - alert_level: 预警级别 (normal, important, urgent)
+                - title: 热搜标题
+                - rank_before: 之前排名
+                - rank_after: 之后排名
+                - rank_change: 排名变化
+                - hot_value_before: 之前热度值
+                - hot_value_after: 之后热度值
+                - heat_change_ratio: 热度变化比例
+                - snapshot_time_before: 之前快照时间
+                - snapshot_time_after: 之后快照时间
+                - details: 详情描述
+                
+        Returns:
+            事件ID，失败返回None
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                result = conn.execute("""
+                    INSERT INTO alert_events (
+                        alert_type, alert_level, title,
+                        rank_before, rank_after, rank_change,
+                        hot_value_before, hot_value_after, heat_change_ratio,
+                        snapshot_time_before, snapshot_time_after, details,
+                        is_pushed, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, CURRENT_TIMESTAMP)
+                    RETURNING id
+                """, [
+                    event_data.get('alert_type', ''),
+                    event_data.get('alert_level', 'normal'),
+                    event_data.get('title', ''),
+                    event_data.get('rank_before'),
+                    event_data.get('rank_after'),
+                    event_data.get('rank_change'),
+                    event_data.get('hot_value_before'),
+                    event_data.get('hot_value_after'),
+                    event_data.get('heat_change_ratio'),
+                    event_data.get('snapshot_time_before'),
+                    event_data.get('snapshot_time_after'),
+                    event_data.get('details')
+                ]).fetchone()
+                
+                conn.commit()
+                
+                if result:
+                    print(f"预警事件已保存: {event_data.get('alert_type')} - {event_data.get('title')}")
+                    return result[0]
+                return None
+        except Exception as e:
+            print(f"保存预警事件失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def get_alert_events(
+        self,
+        alert_type: str = None,
+        alert_level: str = None,
+        start_time: datetime = None,
+        end_time: datetime = None,
+        title_keyword: str = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        查询预警事件
+        
+        Args:
+            alert_type: 预警类型筛选
+            alert_level: 预警级别筛选
+            start_time: 开始时间
+            end_time: 结束时间
+            title_keyword: 标题关键词
+            limit: 返回数量限制
+            offset: 偏移量
+            
+        Returns:
+            预警事件列表
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conditions = ["1=1"]
+                params = []
+                
+                if alert_type:
+                    conditions.append("alert_type = ?")
+                    params.append(alert_type)
+                
+                if alert_level:
+                    conditions.append("alert_level = ?")
+                    params.append(alert_level)
+                
+                if start_time:
+                    conditions.append("created_at >= ?")
+                    params.append(start_time)
+                
+                if end_time:
+                    conditions.append("created_at <= ?")
+                    params.append(end_time)
+                
+                if title_keyword:
+                    conditions.append("title LIKE ?")
+                    params.append(f"%{title_keyword}%")
+                
+                where_clause = " AND ".join(conditions)
+                
+                query = f"""
+                    SELECT id, alert_type, alert_level, title,
+                           rank_before, rank_after, rank_change,
+                           hot_value_before, hot_value_after, heat_change_ratio,
+                           snapshot_time_before, snapshot_time_after, details,
+                           is_pushed, pushed_at, created_at
+                    FROM alert_events
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                """
+                
+                params.extend([limit, offset])
+                
+                events = conn.execute(query, params).fetchall()
+                
+                result = []
+                for row in events:
+                    (id, alert_type, alert_level, title,
+                     rank_before, rank_after, rank_change,
+                     hot_value_before, hot_value_after, heat_change_ratio,
+                     snapshot_time_before, snapshot_time_after, details,
+                     is_pushed, pushed_at, created_at) = row
+                    
+                    result.append({
+                        'id': id,
+                        'alert_type': alert_type,
+                        'alert_level': alert_level,
+                        'title': title,
+                        'rank_before': rank_before,
+                        'rank_after': rank_after,
+                        'rank_change': rank_change,
+                        'hot_value_before': hot_value_before,
+                        'hot_value_after': hot_value_after,
+                        'heat_change_ratio': heat_change_ratio,
+                        'snapshot_time_before': snapshot_time_before.isoformat() if snapshot_time_before else None,
+                        'snapshot_time_after': snapshot_time_after.isoformat() if snapshot_time_after else None,
+                        'details': details,
+                        'is_pushed': is_pushed,
+                        'pushed_at': pushed_at.isoformat() if pushed_at else None,
+                        'created_at': created_at.isoformat() if created_at else None
+                    })
+                
+                return result
+        except Exception as e:
+            print(f"查询预警事件失败: {e}")
+            return []
+    
+    def get_alert_events_count(
+        self,
+        alert_type: str = None,
+        alert_level: str = None,
+        start_time: datetime = None,
+        end_time: datetime = None,
+        title_keyword: str = None
+    ) -> int:
+        """
+        获取预警事件数量
+        
+        Args:
+            alert_type: 预警类型筛选
+            alert_level: 预警级别筛选
+            start_time: 开始时间
+            end_time: 结束时间
+            title_keyword: 标题关键词
+            
+        Returns:
+            事件数量
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conditions = ["1=1"]
+                params = []
+                
+                if alert_type:
+                    conditions.append("alert_type = ?")
+                    params.append(alert_type)
+                
+                if alert_level:
+                    conditions.append("alert_level = ?")
+                    params.append(alert_level)
+                
+                if start_time:
+                    conditions.append("created_at >= ?")
+                    params.append(start_time)
+                
+                if end_time:
+                    conditions.append("created_at <= ?")
+                    params.append(end_time)
+                
+                if title_keyword:
+                    conditions.append("title LIKE ?")
+                    params.append(f"%{title_keyword}%")
+                
+                where_clause = " AND ".join(conditions)
+                
+                query = f"SELECT COUNT(*) FROM alert_events WHERE {where_clause}"
+                
+                result = conn.execute(query, params).fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            print(f"获取预警事件数量失败: {e}")
+            return 0
+    
+    def mark_alert_pushed(self, event_id: int) -> bool:
+        """
+        标记预警事件已推送
+        
+        Args:
+            event_id: 事件ID
+            
+        Returns:
+            是否成功
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                conn.execute("""
+                    UPDATE alert_events 
+                    SET is_pushed = TRUE, pushed_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, [event_id])
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"标记预警推送状态失败: {e}")
+            return False
+    
+    def get_alert_statistics(self, days: int = 7) -> Dict[str, Any]:
+        """
+        获取预警统计数据
+        
+        Args:
+            days: 统计天数
+            
+        Returns:
+            统计数据字典
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                end_time = datetime.now()
+                start_time = end_time - timedelta(days=days)
+                
+                total_count = conn.execute("""
+                    SELECT COUNT(*) FROM alert_events
+                    WHERE created_at >= ? AND created_at <= ?
+                """, [start_time, end_time]).fetchone()[0]
+                
+                by_type = conn.execute("""
+                    SELECT alert_type, COUNT(*) as cnt
+                    FROM alert_events
+                    WHERE created_at >= ? AND created_at <= ?
+                    GROUP BY alert_type
+                    ORDER BY cnt DESC
+                """, [start_time, end_time]).fetchall()
+                
+                by_level = conn.execute("""
+                    SELECT alert_level, COUNT(*) as cnt
+                    FROM alert_events
+                    WHERE created_at >= ? AND created_at <= ?
+                    GROUP BY alert_level
+                    ORDER BY cnt DESC
+                """, [start_time, end_time]).fetchall()
+                
+                by_date = conn.execute("""
+                    SELECT 
+                        DATE(created_at) as event_date,
+                        COUNT(*) as cnt
+                    FROM alert_events
+                    WHERE created_at >= ? AND created_at <= ?
+                    GROUP BY DATE(created_at)
+                    ORDER BY event_date
+                """, [start_time, end_time]).fetchall()
+                
+                top_topics = conn.execute("""
+                    SELECT title, COUNT(*) as cnt
+                    FROM alert_events
+                    WHERE created_at >= ? AND created_at <= ?
+                    GROUP BY title
+                    ORDER BY cnt DESC
+                    LIMIT 10
+                """, [start_time, end_time]).fetchall()
+                
+                return {
+                    'period_days': days,
+                    'total_count': total_count,
+                    'by_type': {row[0]: row[1] for row in by_type},
+                    'by_level': {row[0]: row[1] for row in by_level},
+                    'by_date': [
+                        {'date': row[0].isoformat() if row[0] else None, 'count': row[1]}
+                        for row in by_date
+                    ],
+                    'top_topics': [
+                        {'title': row[0], 'count': row[1]}
+                        for row in top_topics
+                    ]
+                }
+        except Exception as e:
+            print(f"获取预警统计失败: {e}")
+            return {'period_days': days, 'total_count': 0, 'error': str(e)}
+    
+    def get_topic_rank_history(self, title: str, hours: int = 24) -> List[Dict[str, Any]]:
+        """
+        获取指定话题的排名历史（用于异常检测）
+        
+        Args:
+            title: 热搜标题
+            hours: 查询小时数
+            
+        Returns:
+            排名历史列表，按时间升序排列
+        """
+        try:
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=hours)
+            
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT snapshot_time, rank, hot_value, hot
+                    FROM hot_search_items
+                    WHERE title = ? AND snapshot_time >= ? AND snapshot_time <= ?
+                    ORDER BY snapshot_time ASC
+                """, [title, start_time, end_time]).fetchall()
+                
+                history = []
+                for row in results:
+                    snapshot_time, rank, hot_value, hot = row
+                    history.append({
+                        'snapshot_time': snapshot_time.isoformat() if snapshot_time else None,
+                        'rank': rank,
+                        'hot_value': hot_value,
+                        'hot': hot
+                    })
+                
+                return history
+        except Exception as e:
+            print(f"获取话题排名历史失败: {e}")
+            return []
+    
+    def get_consecutive_appear_days(self, title: str) -> int:
+        """
+        计算话题连续上榜天数
+        
+        Args:
+            title: 热搜标题
+            
+        Returns:
+            连续上榜天数
+        """
+        try:
+            with duckdb.connect(self.db_path) as conn:
+                results = conn.execute("""
+                    SELECT DISTINCT DATE(snapshot_time) as appear_date
+                    FROM hot_search_items
+                    WHERE title = ?
+                    ORDER BY appear_date DESC
+                """, [title]).fetchall()
+                
+                if not results:
+                    return 0
+                
+                dates = [row[0] for row in results]
+                consecutive_days = 0
+                expected_date = dates[0]
+                
+                for date in dates:
+                    if date == expected_date:
+                        consecutive_days += 1
+                        expected_date = date - timedelta(days=1)
+                    else:
+                        break
+                
+                return consecutive_days
+        except Exception as e:
+            print(f"计算连续上榜天数失败: {e}")
             return 0
 
 

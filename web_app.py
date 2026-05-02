@@ -307,6 +307,18 @@ def investment_topics():
     return render_template('web/investment_topics.html')
 
 
+@app.route('/alerts')
+def alerts():
+    """预警列表页面"""
+    return render_template('web/alerts.html')
+
+
+@app.route('/alert-config')
+def alert_config():
+    """预警配置页面"""
+    return render_template('web/alert_config.html')
+
+
 @app.route('/api/latest')
 def api_latest():
     """获取最新快照数据"""
@@ -871,6 +883,223 @@ def api_snapshots():
         })
     
     return jsonify(result)
+
+
+@app.route('/api/alert-config')
+def api_alert_config():
+    """获取预警配置"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    try:
+        config = storage.get_alert_config('default')
+        keywords = storage.get_alert_keywords()
+        
+        return jsonify({
+            'config': config,
+            'keywords': keywords
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/alert-config', methods=['POST'])
+def api_save_alert_config():
+    """保存预警配置"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    try:
+        config_data = request.json.get('config', {})
+        success = storage.save_alert_config(config_data, 'default')
+        
+        if success:
+            return jsonify({'success': True, 'message': '配置保存成功'})
+        else:
+            return jsonify({'success': False, 'error': '保存失败'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/alert-keywords', methods=['POST'])
+def api_add_alert_keyword():
+    """添加关注关键词"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    try:
+        keyword = request.json.get('keyword', '').strip()
+        is_included = request.json.get('is_included', True)
+        priority = request.json.get('priority', 0)
+        
+        if not keyword:
+            return jsonify({'success': False, 'error': '关键词不能为空'}), 400
+        
+        keyword_id = storage.add_alert_keyword(keyword, is_included, priority)
+        
+        if keyword_id:
+            return jsonify({'success': True, 'keyword_id': keyword_id})
+        else:
+            return jsonify({'success': False, 'error': '添加失败'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/alert-keywords/<keyword>', methods=['DELETE'])
+def api_remove_alert_keyword(keyword):
+    """删除关注关键词"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    try:
+        success = storage.remove_alert_keyword(keyword)
+        
+        if success:
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': '删除失败'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/alerts')
+def api_alerts():
+    """获取预警事件列表"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    try:
+        alert_type = request.args.get('type')
+        alert_level = request.args.get('level')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        title_keyword = request.args.get('keyword')
+        limit = request.args.get('limit', 100)
+        offset = request.args.get('offset', 0)
+        
+        try:
+            limit = int(limit)
+        except:
+            limit = 100
+        try:
+            offset = int(offset)
+        except:
+            offset = 0
+        
+        start_time = None
+        end_time = None
+        if start_date_str:
+            try:
+                start_time = datetime.strptime(start_date_str, '%Y-%m-%d')
+                start_time = start_time.replace(hour=0, minute=0, second=0)
+            except:
+                pass
+        if end_date_str:
+            try:
+                end_time = datetime.strptime(end_date_str, '%Y-%m-%d')
+                end_time = end_time.replace(hour=23, minute=59, second=59)
+            except:
+                pass
+        
+        alerts = storage.get_alert_events(
+            alert_type=alert_type,
+            alert_level=alert_level,
+            start_time=start_time,
+            end_time=end_time,
+            title_keyword=title_keyword,
+            limit=limit,
+            offset=offset
+        )
+        
+        total_count = storage.get_alert_events_count(
+            alert_type=alert_type,
+            alert_level=alert_level,
+            start_time=start_time,
+            end_time=end_time,
+            title_keyword=title_keyword
+        )
+        
+        return jsonify({
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset,
+            'alerts': alerts
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/alert-stats')
+def api_alert_stats():
+    """获取预警统计数据"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    try:
+        days = request.args.get('days', 7)
+        try:
+            days = int(days)
+        except:
+            days = 7
+        
+        stats = storage.get_alert_statistics(days=days)
+        
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/alert-test', methods=['POST'])
+def api_alert_test():
+    """测试预警推送"""
+    if not storage:
+        return jsonify({'error': '数据存储未初始化'}), 500
+    
+    try:
+        from anomaly_detector import AnomalyDetector, ALERT_TYPE_NEW_TOPIC, ALERT_LEVEL_URGENT
+        
+        test_alerts = [{
+            'alert_type': ALERT_TYPE_NEW_TOPIC,
+            'alert_level': ALERT_LEVEL_URGENT,
+            'title': '测试预警消息 - 新上榜话题',
+            'rank_before': None,
+            'rank_after': 5,
+            'rank_change': None,
+            'hot_value_before': None,
+            'hot_value_after': 5000000.0,
+            'heat_change_ratio': None,
+            'snapshot_time_before': None,
+            'snapshot_time_after': datetime.now().isoformat(),
+            'details': '这是一条测试预警消息，用于验证推送功能是否正常工作。'
+        }]
+        
+        push_config = config.get('push', {})
+        if push_config.get('enabled', False):
+            from pusher.manager import get_push_manager
+            push_manager = get_push_manager(push_config)
+            
+            if push_manager.is_available():
+                results = push_manager.push_alert(test_alerts)
+                return jsonify({
+                    'success': True,
+                    'message': '测试预警已发送',
+                    'push_results': results
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': '没有可用的推送器'
+                })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '推送功能未启用'
+            })
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/static/<path:filename>')
