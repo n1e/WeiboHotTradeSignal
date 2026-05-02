@@ -890,6 +890,9 @@ def init_app():
         print("警告: 无法初始化数据存储")
         return False
     
+    from main import init_logging
+    init_logging(config)
+    
     return True
 
 
