@@ -524,10 +524,164 @@ class SummaryTaskScheduler:
         self._stop_event.set()
 
 
+class InvestmentMiningScheduler:
+    """
+    投资题材挖掘任务调度器
+    支持每日定时任务
+    """
+    
+    def __init__(self, config: Dict[str, Any]):
+        """
+        初始化投资题材挖掘任务调度器
+        
+        Args:
+            config: 配置字典
+        """
+        self.config = config
+        self.mining_config = config.get('investment_mining', {})
+        
+        self.daily_enabled = self.mining_config.get('daily', {}).get('enabled', True)
+        self.daily_time = self.mining_config.get('daily', {}).get('time', '21:30')
+        
+        self._stop_event = Event()
+        self._running = False
+        
+        self._last_daily_run_date = None
+        
+        self._parse_time_configs()
+        self._setup_signal_handlers()
+        
+        logger.info(f"投资题材挖掘任务调度器初始化完成")
+        logger.info(f"  每日挖掘: {'启用' if self.daily_enabled else '禁用'}，时间: {self.daily_time}")
+    
+    def _parse_time_configs(self):
+        """解析时间配置"""
+        try:
+            hour, minute = map(int, self.daily_time.split(':'))
+            self.daily_hour = hour
+            self.daily_minute = minute
+        except:
+            logger.warning(f"解析每日投资挖掘时间配置失败: {self.daily_time}，使用默认值 21:30")
+            self.daily_hour = 21
+            self.daily_minute = 30
+    
+    def _setup_signal_handlers(self):
+        """设置信号处理器"""
+        def handle_signal(signum, frame):
+            logger.info(f"收到信号 {signum}，准备停止投资题材挖掘任务调度器...")
+            self.stop()
+        
+        signal.signal(signal.SIGINT, handle_signal)
+        signal.signal(signal.SIGTERM, handle_signal)
+    
+    def is_daily_task_time(self) -> bool:
+        """
+        检查是否到达每日投资题材挖掘任务时间
+        
+        Returns:
+            是否到达执行时间
+        """
+        if not self.daily_enabled:
+            return False
+        
+        now = datetime.now()
+        current_date = now.date()
+        
+        if self._last_daily_run_date == current_date:
+            return False
+        
+        if now.hour == self.daily_hour and now.minute >= self.daily_minute:
+            return True
+        
+        return False
+    
+    def run_daily_mining_task(self) -> Dict[str, Any]:
+        """
+        执行每日投资题材挖掘任务
+        
+        Returns:
+            执行结果
+        """
+        from investment_topic_miner import InvestmentTopicMiner
+        
+        run_id = f"mining_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        start_time = datetime.now()
+        
+        result = {
+            'run_id': run_id,
+            'task_type': 'investment_mining',
+            'start_time': start_time.isoformat(),
+            'end_time': None,
+            'success': False,
+            'details': {}
+        }
+        
+        try:
+            log_step("投资题材挖掘", f"开始执行每日投资题材挖掘任务 - 运行ID: {run_id}")
+            
+            miner = InvestmentTopicMiner(self.config)
+            mining_result = miner.run_daily_mining()
+            
+            if mining_result and mining_result.get('success'):
+                result['success'] = True
+                result['details']['topics_count'] = len(mining_result.get('analysis_result', {}).get('investment_topics', []))
+                result['details']['push_success'] = mining_result.get('push_success', False)
+                self._last_daily_run_date = datetime.now().date()
+                log_step("投资题材挖掘", f"每日投资题材挖掘任务执行成功")
+            else:
+                result['success'] = False
+                result['details']['error'] = "投资题材挖掘分析失败"
+                log_error("投资题材挖掘", "投资题材挖掘分析失败")
+        
+        except Exception as e:
+            result['success'] = False
+            result['details']['error'] = str(e)
+            log_error("投资题材挖掘", f"每日投资题材挖掘任务执行失败: {e}", e)
+        
+        end_time = datetime.now()
+        result['end_time'] = end_time.isoformat()
+        result['duration_seconds'] = (end_time - start_time).total_seconds()
+        
+        return result
+    
+    def start(self):
+        """启动投资题材挖掘任务调度器"""
+        logger.info("=" * 60)
+        logger.info("投资题材挖掘任务调度器启动")
+        logger.info("=" * 60)
+        
+        self._running = True
+        self._stop_event.clear()
+        
+        while self._running and not self._stop_event.is_set():
+            try:
+                now = datetime.now()
+                
+                if self.is_daily_task_time():
+                    logger.info(f"到达每日投资题材挖掘任务时间 ({self.daily_time})，开始执行...")
+                    self.run_daily_mining_task()
+                
+                logger.info("投资题材挖掘任务调度器进入等待状态，60秒后再次检查...")
+                self._stop_event.wait(60)
+            
+            except Exception as e:
+                log_error("投资题材挖掘任务调度器", f"调度循环发生异常: {e}", e)
+                logger.info("等待 60 秒后继续...")
+                self._stop_event.wait(60)
+        
+        logger.info("投资题材挖掘任务调度器已停止")
+    
+    def stop(self):
+        """停止投资题材挖掘任务调度器"""
+        logger.info("正在停止投资题材挖掘任务调度器...")
+        self._running = False
+        self._stop_event.set()
+
+
 class CombinedScheduler:
     """
     综合调度器
-    同时运行常规任务调度器和总结任务调度器
+    同时运行常规任务调度器、总结任务调度器和投资题材挖掘调度器
     """
     
     def __init__(self, config: Dict[str, Any], task_func: Optional[Callable] = None):
@@ -546,12 +700,14 @@ class CombinedScheduler:
         
         self.regular_scheduler = None
         self.summary_scheduler = None
+        self.investment_mining_scheduler = None
         
         if task_func:
             schedule_config = config.get('schedule', {})
             self.regular_scheduler = TaskScheduler(schedule_config, task_func)
         
         self.summary_scheduler = SummaryTaskScheduler(config)
+        self.investment_mining_scheduler = InvestmentMiningScheduler(config)
     
     def start(self):
         """启动所有调度器"""
@@ -572,6 +728,10 @@ class CombinedScheduler:
             if self.summary_scheduler:
                 self.summary_scheduler.start()
         
+        def run_investment_mining_scheduler():
+            if self.investment_mining_scheduler and self.investment_mining_scheduler.daily_enabled:
+                self.investment_mining_scheduler.start()
+        
         regular_thread = None
         if self.regular_scheduler:
             regular_thread = threading.Thread(target=run_regular_scheduler, daemon=True)
@@ -581,6 +741,10 @@ class CombinedScheduler:
         summary_thread = threading.Thread(target=run_summary_scheduler, daemon=True)
         summary_thread.start()
         logger.info("总结任务调度器线程已启动")
+        
+        mining_thread = threading.Thread(target=run_investment_mining_scheduler, daemon=True)
+        mining_thread.start()
+        logger.info("投资题材挖掘调度器线程已启动")
         
         while self._running and not self._stop_event.is_set():
             try:
@@ -603,3 +767,6 @@ class CombinedScheduler:
         
         if self.summary_scheduler:
             self.summary_scheduler.stop()
+        
+        if self.investment_mining_scheduler:
+            self.investment_mining_scheduler.stop()

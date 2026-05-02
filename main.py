@@ -556,6 +556,71 @@ def run_weekly_summary(config, week_start_str: str = None, week_end_str: str = N
         return None
 
 
+def run_investment_mining(config, target_date_str: str = None):
+    """
+    执行每日投资题材挖掘
+    
+    Args:
+        config: 配置
+        target_date_str: 目标日期字符串，格式为 YYYY-MM-DD
+        
+    Returns:
+        执行结果
+    """
+    from investment_topic_miner import InvestmentTopicMiner
+    from datetime import datetime
+    
+    log_step("投资题材挖掘", "开始执行每日投资题材挖掘...")
+    
+    if target_date_str:
+        try:
+            target_date = datetime.strptime(target_date_str, '%Y-%m-%d')
+        except ValueError as e:
+            logger.error(f"日期格式错误: {e}，请使用 YYYY-MM-DD 格式")
+            return None
+    else:
+        target_date = datetime.now()
+    
+    miner = InvestmentTopicMiner(config)
+    result = miner.run_daily_mining(target_date)
+    
+    if result and result.get('success'):
+        logger.info("=" * 60)
+        logger.info("每日投资题材挖掘执行完成！")
+        logger.info(f"分析日期: {target_date.strftime('%Y-%m-%d')}")
+        logger.info("=" * 60)
+        
+        analysis_result = result.get('analysis_result', {})
+        investment_topics = analysis_result.get('investment_topics', [])
+        
+        if investment_topics:
+            logger.info(f"\n挖掘到 {len(investment_topics)} 个投资题材:")
+            for idx, topic in enumerate(investment_topics[:5], 1):
+                topic_name = topic.get('topic_name', '未知题材')
+                dimension = topic.get('analysis_dimension', '未分类')
+                confidence = topic.get('confidence_level', '中')
+                related_industries = topic.get('related_industries', [])
+                
+                logger.info(f"\n【{idx}】{topic_name}")
+                logger.info(f"     分类: {dimension} | 信心: {confidence}")
+                if related_industries:
+                    logger.info(f"     相关行业: {', '.join(related_industries)}")
+                
+                core_logic = topic.get('core_logic', '')
+                if core_logic:
+                    logger.info(f"     核心逻辑: {core_logic[:100]}..." if len(core_logic) > 100 else f"     核心逻辑: {core_logic}")
+        else:
+            logger.info("\n当日未挖掘到明显的投资题材")
+        
+        push_success = result.get('push_success', False)
+        logger.info(f"\n飞书推送: {'成功' if push_success else '失败或未推送'}")
+        
+        return result
+    else:
+        logger.warning("每日投资题材挖掘执行失败")
+        return None
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='微博热搜交易信号分析器')
@@ -571,7 +636,8 @@ def main():
     summary_group = parser.add_argument_group('总结任务参数（独立调用时使用）')
     summary_group.add_argument('--daily-summary', action='store_true', help='执行每日热门话题总结')
     summary_group.add_argument('--weekly-summary', action='store_true', help='执行每周热门话题总结')
-    summary_group.add_argument('--summary-date', type=str, help='指定每日总结的日期，格式为 YYYY-MM-DD（默认为昨天）')
+    summary_group.add_argument('--investment-mining', action='store_true', help='执行每日投资题材挖掘')
+    summary_group.add_argument('--summary-date', type=str, help='指定每日总结/投资挖掘的日期，格式为 YYYY-MM-DD')
     summary_group.add_argument('--week-start', type=str, help='指定每周总结的开始日期，格式为 YYYY-MM-DD')
     summary_group.add_argument('--week-end', type=str, help='指定每周总结的结束日期，格式为 YYYY-MM-DD')
     
@@ -647,6 +713,16 @@ def main():
     if args.weekly_summary:
         logger.info("\n⚠️  执行每周热门话题总结模式")
         result = run_weekly_summary(config, args.week_start, args.week_end)
+        if result:
+            logger.info("执行成功！")
+            sys.exit(0)
+        else:
+            logger.error("执行失败！")
+            sys.exit(1)
+    
+    if args.investment_mining:
+        logger.info("\n⚠️  执行每日投资题材挖掘模式")
+        result = run_investment_mining(config, args.summary_date)
         if result:
             logger.info("执行成功！")
             sys.exit(0)

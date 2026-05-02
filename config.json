@@ -35,6 +35,12 @@
       "day": 6
     }
   },
+  "investment_mining": {
+    "daily": {
+      "enabled": true,
+      "time": "21:30"
+    }
+  },
   "push": {
     "enabled": true,
     "feishu": {
