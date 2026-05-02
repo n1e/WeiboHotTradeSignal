@@ -300,16 +300,29 @@
 
 {% block extra_js %}
 <script>
+console.log('投资题材页面脚本开始加载...');
+
+window.onerror = function(msg, url, lineNo, columnNo, error) {
+    console.error('JavaScript错误:', msg, '在第', lineNo, '行');
+    if (error && error.stack) {
+        console.error('堆栈:', error.stack);
+    }
+    alert('页面发生错误，请查看控制台了解详情');
+    return false;
+};
+
 let currentAnalysis = null;
 let selectedTopicIndex = null;
 
 function initDateSelector() {
+    console.log('initDateSelector 被调用');
     const today = new Date();
     const dateInput = document.getElementById('analysisDate');
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
     dateInput.value = yesterday.toISOString().split('T')[0];
     dateInput.max = today.toISOString().split('T')[0];
+    console.log('日期选择器初始化完成，日期:', dateInput.value);
 }
 
 function getDimensionClass(dimension) {
@@ -338,13 +351,19 @@ function getConfidenceText(confidence) {
 }
 
 async function loadAnalysis() {
+    console.log('loadAnalysis 被调用');
     const container = document.getElementById('topicListContainer');
     const date = document.getElementById('analysisDate').value;
+    
+    console.log('查询日期:', date);
     
     container.innerHTML = '<div class="loading-spinner"><div class="spinner-border" role="status"></div></div>';
     
     try {
-        const data = await apiCall(`/api/investment-topic?date=${date}`);
+        const url = `/api/investment-topic?date=${date}`;
+        console.log('请求URL:', url);
+        const data = await apiCall(url, { method: 'GET' });
+        console.log('API返回数据:', data);
         currentAnalysis = data;
         selectedTopicIndex = null;
         
@@ -619,20 +638,35 @@ function renderTopicDetail(topic) {
 }
 
 async function runMiningTask() {
-    const date = document.getElementById('analysisDate').value;
+    console.log('runMiningTask 被调用');
     
-    if (!confirm(`确定要执行 ${date} 的投资题材挖掘任务吗？这可能需要一些时间。`)) {
+    const date = document.getElementById('analysisDate').value;
+    console.log('挖掘日期:', date);
+    
+    const confirmed = confirm(`确定要执行 ${date} 的投资题材挖掘任务吗？\n这可能需要一些时间（通常30-60秒）。`);
+    console.log('用户确认:', confirmed);
+    
+    if (!confirmed) {
+        console.log('用户取消了任务');
         return;
     }
     
     try {
-        const result = await apiCall('/api/task/run', {
-            method: 'POST',
-            body: JSON.stringify({ 
-                type: 'investment_mining',
-                date: date
-            })
+        const url = '/api/task/run';
+        const body = JSON.stringify({ 
+            type: 'investment_mining',
+            date: date
         });
+        
+        console.log('请求URL:', url);
+        console.log('请求Body:', body);
+        
+        const result = await apiCall(url, {
+            method: 'POST',
+            body: body
+        });
+        
+        console.log('API返回结果:', result);
         
         if (result.success) {
             alert('投资题材挖掘任务执行成功！');
@@ -642,6 +676,7 @@ async function runMiningTask() {
         }
     } catch (error) {
         console.error('执行任务失败:', error);
+        console.error('错误堆栈:', error.stack);
         alert('执行任务失败: ' + error.message);
     }
 }
@@ -671,7 +706,23 @@ async function exportAnalysis() {
     }
 }
 
-initDateSelector();
-loadAnalysis();
+console.log('投资题材页面脚本加载完成，等待页面加载...');
+
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOMContentLoaded 事件触发');
+    
+    try {
+        initDateSelector();
+        console.log('initDateSelector 执行完成');
+        loadAnalysis();
+        console.log('loadAnalysis 调用完成');
+    } catch (error) {
+        console.error('初始化失败:', error);
+        console.error('错误堆栈:', error.stack);
+        alert('页面初始化失败: ' + error.message);
+    }
+});
+
+console.log('页面初始化代码设置完成');
 </script>
 {% endblock %}
